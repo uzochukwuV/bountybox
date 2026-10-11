@@ -6,13 +6,15 @@ holds the content.
 
 ## The model in one paragraph
 
-A bounty is **open to many workers**. Anyone (except the creator) can press
-"working on it", which registers them onchain via `startWorking` — so the whole
-board sees who has started. While *nobody* has started, the creator can withdraw
-the reward (`cancelBounty`). Once at least one person is working, the creator
-cannot withdraw; instead they accept exactly one worker's submission
-(`approveWork`) and the reward is paid to that worker. This is a bounty-style
-"many attempts, one winner" flow.
+A bounty is **open to many workers** and pays up to **`maxWinners`** of them a
+flat **`rewardPerWinner`**. A classic single-winner bounty is just `maxWinners =
+1`. Anyone (except the creator) can press "working on it", which registers them
+onchain via `startWorking`, so the whole board sees who started. While *nobody*
+is working, the creator can withdraw (`cancelBounty`). Once at least one person
+is working, the creator cannot withdraw; instead they accept workers one at a
+time (`approveWork`) — up to `maxWinners`, after which the bounty auto-completes.
+If the creator pays fewer than `maxWinners` and wants to stop, `finalizeBounty`
+closes the bounty and refunds the unspent prize pool.
 
 ## Why split onchain / offchain
 
@@ -27,18 +29,18 @@ to display who is working.
 
 | Data | Where | Notes |
 | --- | --- | --- |
-| Bounty creator | `Bounty.creator` | Authorization for accept/withdraw |
-| Who is working | `isWorking[id][worker]`, `_workers[id]` | The "working on it" set |
-| Worker count | `Bounty.workerCount` | Gates creator withdrawal |
-| USDC reward amount | `Bounty.reward` | 6-decimal base units |
+| Bounty creator | `Bounty.creator` | Authorization for accept/finalize/withdraw |
+| Who is working | `isWorking` + `Bounty.workers` | The "working on it" set |
+| Who was paid | `isWinner` + `Bounty.winners` | Accepted winners so far |
+| Worker / winner counts | `workerCount`, `winnerCount` | Gate withdrawal and completion |
+| Prize structure | `rewardPerWinner`, `maxWinners` | Escrow = `rewardPerWinner * maxWinners` |
+| Reward held | `remainingReward(id)` | Unclaimed winner slots |
 | Escrow status | `Bounty.status` + `isFunded()` | Funds in or out |
 | Application deadline | `Bounty.applicationDeadline` | Last time to `startWorking` |
 | Submission deadline | `Bounty.submissionDeadline` | When submissions are expected |
-| Accepted worker | `Bounty.winningWorker` | Who got paid |
-| Accepted submission reference | `Bounty.winningSubmissionRef` | Hash of offchain submission |
 | Content hash | `Bounty.contentHash` | Root of offchain metadata (title, files, …) |
+| Accepted submission refs | `BountyWinnerPaid` event | Hash of each accepted submission |
 | Lifecycle events | emitted events | Indexed for the app/audit trail |
-| Refund / payout eligibility | state machine rules | See below |
 
 ### Offchain (database — see `db/schema.sql`)
 
@@ -49,8 +51,8 @@ records and notifications. None of this is required to move funds.
 ### Linking the two
 
 - `contentHash` anchors the task content; the API resolves it to a `task` row.
-- `winningSubmissionRef` anchors the accepted work; the API resolves it to a
-  `submission` row.
+- Each `BountyWinnerPaid.submissionRef` anchors an accepted submission; the API
+  resolves it to a `submission` row and marks it accepted.
 - `WorkStarted` events populate the `bounty_workers` table, so the UI can show
   "N working" without every client replaying chain logs.
 - The chain is the source of truth for money and permissions; the database is
@@ -59,55 +61,58 @@ records and notifications. None of this is required to move funds.
 ## Lifecycle state machine
 
 ```
-                 createBounty (funds escrowed)
+                 createBounty (escrow = rewardPerWinner * maxWinners)
                           |
                           v
                      Open  <---- startWorking (any worker, before app. deadline)
                       |  |
-     cancelBounty ----+  |
-     (creator, only      |
-      while workerCount  |
-      == 0)              |
-      -> Cancelled       |
+     cancelBounty ----+  |      (creator, only while workerCount == 0)
+     (refund all)        |       -> Cancelled
                          v
-                    approveWork (creator accepts one worker)
-                         -> Completed (pay -> that worker)
+               approveWork(worker, ref)   repeatable, up to maxWinners
+                         |                  pays rewardPerWinner each time
+                         +--> winnerCount == maxWinners -> Completed
+                         |
+     finalizeBounty -----+  (creator, >=1 winner paid) -> Completed
+     (refund unspent)        refund = rewardPerWinner * (maxWinners - winnerCount)
 
-     expireBounty (permissionless safety valve) -> Expired (refund -> creator)
-        - abandoned:      workerCount == 0 and applicationDeadline passed
-        - creator silent: submissionDeadline + reviewPeriod passed
+     expireBounty (permissionless safety valve) -> Expired (refund unspent -> creator)
+        - abandoned:      past app deadline and (no live workers)
+        - creator silent: past submissionDeadline + reviewPeriod
 ```
 
-- The creator can withdraw (`cancelBounty`) **only while no one is working**.
-  Once a worker starts, the creator's only money-moving action is `approveWork`.
-- `approveWork` pays exactly one worker who must be in the `isWorking` set. The
+- The creator can withdraw the whole pool (`cancelBounty`) **only while no one
+  is working**. Once a worker starts, the creator's only money-moving actions
+  are `approveWork` and `finalizeBounty`.
+- `approveWork` pays a worker only if they are in the `isWorking` set, so the
   creator cannot redirect the funds to an arbitrary address.
-- `expireBounty` guarantees funds can never be locked: an abandoned bounty
-  (nobody started) or one the creator never resolves is refunded to the creator
-  by anyone, after the deadlines. If a worker *is* working, the creator has the
-  review grace period before the valve opens.
+- `finalizeBounty` lets the creator cap the number of winners early and reclaim
+  the unspent pool (e.g. only 2 of 3 slots were worth filling).
+- `expireBounty` guarantees funds can never be locked: unspent escrow is refunded
+  to the creator by anyone after the deadlines. Already-paid winners keep their
+  rewards; only the remainder is refunded.
 
 ## Worker incentives (read this before shipping)
 
-Because anyone can start and only the creator picks a winner, a worker's reward
-is not guaranteed until `approveWork` lands. Two consequences the product must
-handle offchain:
+Because anyone can start and only the creator picks winners, a worker's reward
+is not guaranteed until `approveWork` lands. Consequences the product must handle
+offchain:
 
-- **Duplicate work is possible.** Multiple workers may independently do the same
-  task and only one is paid. The `getWorkers` list is public, so the UI can show
-  "3 people are working on this" to discourage piling on.
-- **No onchain worker protection.** Unlike a single-worker escrow, there is no
-  `claimUnreviewed` for the worker: the creator always chooses. If you later want
-  to protect a worker who finished but is ignored, add a bounded
-  "submit → creator must act → worker can claim" flow rather than trusting the
+- **Duplicate work is possible.** Many workers may do the same task and only
+  `maxWinners` are paid. `getWorkers` is public, so the UI can show "3 working,
+  1 spot left" to discourage piling on.
+- **No onchain worker protection.** There is no `claimUnreviewed`: the creator
+  always chooses. If you later want to protect a worker who finished but is
+  ignored, add a bounded submit → accept → claim flow rather than trusting the
   offchain clock. This is a deliberate trade to keep the contract small.
 
 ## Offchain indexer expectations
 
 A backend watches the contract's events (`BountyCreated`, `WorkStarted`,
-`BountyCompleted`, `BountyCancelled`, `BountyExpired`) and writes the projected
-lifecycle into the database. Bounty `id` is the join key between the chain and
-the `bounty` table.
+`BountyWinnerPaid`, `BountyCompleted`, `BountyCancelled`, `BountyExpired`) and
+writes the projected lifecycle into the database. Bounty `id` is the join key
+between the chain and the `bounty` table. `BountyWinnerPaid` may fire up to
+`maxWinners` times per bounty.
 
 ## USDC on Arc
 
@@ -134,10 +139,13 @@ npx hardhat ignition deploy ignition/modules/BountyBoard.ts --network arcTestnet
 
 - `SafeERC20` for all transfers; `nonReentrant` on every function that moves funds.
 - Custom errors instead of string reverts (cheaper, easier to assert in tests).
-- Escrow amount is zeroed before every external transfer (checks-effects-interactions).
+- Escrow accounting is exact: escrowed = `rewardPerWinner * maxWinners`; each
+  payout subtracts one `rewardPerWinner`; refunds use the remaining slots. Over
+  the life of a bounty, `sum(payouts) + refunds == escrow`, so the contract
+  never pays out more than it holds.
 - No admin, no upgradeability, no arbitrary token: the contract is immutable and
   only ever moves the one configured USDC. This keeps the audit surface small.
 - The payout recipient is constrained to the onchain `isWorking` set, so the
   creator cannot drain escrow to an address of their choosing.
-- Values from offchain (hashes) are opaque `bytes32`; the contract never parses
-  or trusts them beyond storing/emitting them.
+- Offchain values (hashes) are opaque `bytes32`; the contract never parses or
+  trusts them beyond storing/emitting them.

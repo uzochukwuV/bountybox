@@ -6,7 +6,7 @@
 -- Rows link to the chain via bounty_id / content_hash / submission_ref.
 --
 -- An indexer watches the contract events and reconciles the cached lifecycle
--- columns (status, worker_count, winning_worker_wallet, reward_amount,
+-- columns (status, worker_count, winner_count, reward_per_winner, max_winners,
 -- deadlines, timestamps).
 
 CREATE TYPE bounty_status AS ENUM (
@@ -46,13 +46,13 @@ CREATE TABLE tasks (
   category             TEXT,
   instructions         TEXT,
   -- Mirrored from chain by the indexer (display + filtering only):
-  reward_amount        NUMERIC(78, 0),         -- USDC base units (6 decimals)
+  reward_per_winner    NUMERIC(78, 0),         -- USDC base units (6 decimals)
+  max_winners          INT,
   application_deadline TIMESTAMPTZ,
   submission_deadline  TIMESTAMPTZ,
   status               bounty_status,
   worker_count         INT NOT NULL DEFAULT 0, -- distinct workers who started
-  winning_worker_wallet TEXT,                  -- who got paid (on completion)
-  winning_submission_id BIGINT,                -- FK added after submissions table
+  winner_count         INT NOT NULL DEFAULT 0, -- winners paid so far
   chain_tx_hash        TEXT,                   -- creation tx
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -85,8 +85,9 @@ CREATE TABLE task_attachments (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Full work submissions. One per worker attempt; the winner's submission_ref
--- matches Bounty.winningSubmissionRef onchain.
+-- Full work submissions. One per worker attempt. When the creator accepts a
+-- worker onchain (BountyWinnerPaid), the matching row is marked 'accepted' and
+-- its submission_ref records the anchored hash.
 CREATE TABLE submissions (
   id             BIGSERIAL PRIMARY KEY,
   task_id        BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -99,11 +100,7 @@ CREATE TABLE submissions (
 );
 
 CREATE INDEX submissions_task_idx ON submissions (task_id);
-
--- Enforce the tasks.winning_submission_id FK now that submissions exists.
-ALTER TABLE tasks
-  ADD CONSTRAINT tasks_winning_submission_fk
-  FOREIGN KEY (winning_submission_id) REFERENCES submissions(id) ON DELETE SET NULL;
+CREATE INDEX submissions_status_idx ON submissions (status);
 
 CREATE TABLE submission_attachments (
   id            BIGSERIAL PRIMARY KEY,

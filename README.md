@@ -7,30 +7,32 @@ the onchain/offchain split, and [db/schema.sql](db/schema.sql) for the schema.
 
 ## Contract
 
-`contracts/BountyBoard.sol` escrows USDC rewards for open, many-worker
-bounties: workers press "working on it" (recorded onchain), the creator accepts
-any one of them and pays that worker, and a permissionless safety valve
-guarantees refunds.
+`contracts/BountyBoard.sol` escrows USDC for open, many-worker bounties that pay
+up to `maxWinners` workers a flat `rewardPerWinner` (a classic single-winner
+bounty is just `maxWinners = 1`). Workers press "working on it" (recorded
+onchain), the creator accepts workers one at a time, and a permissionless safety
+valve guarantees refunds of any unspent prize pool.
 
 ```
 createBounty ──► Open ──startWorking──► (workers register onchain)
                  │ │
-   cancelBounty  │ │   (creator, only while workerCount == 0) ──► Cancelled (refund)
-   (refund)      │ │
-                 │ └─approveWork(worker) ──► Completed (pay -> that worker)
-                 │
-                 └─expireBounty ──► Expired (refund)
-                    · abandoned: nobody started, app deadline passed
+   cancelBounty  │ │   (creator, only while workerCount == 0) ──► Cancelled (refund all)
+                 │ ├─approveWork(worker, ref) ──► pays rewardPerWinner  (repeatable)
+                 │ │     └── winnerCount == maxWinners ──► Completed
+                 │ └─finalizeBounty ──► Completed (refund unspent pool)
+                 └─expireBounty ──► Expired (refund unspent; permissionless)
+                    · abandoned: nobody working, app deadline passed
                     · creator silent: submissionDeadline + reviewPeriod passed
 ```
 
-- Creator: `createBounty`, `approveWork(id, worker, submissionRef)`, `cancelBounty`.
+- Creator: `createBounty`, `approveWork(id, worker, ref)`, `finalizeBounty`, `cancelBounty`.
 - Worker: `startWorking(id)` — the UI's "working on it" button.
-- Anyone: `expireBounty(id)` (refund always goes to the creator).
-- Views: `getBounty`, `getWorkers`, `isWorking`, `isFunded`.
+- Anyone: `expireBounty(id)` (unspent escrow always returns to the creator).
+- Views: `getBounty`, `getWorkers`, `getWinners`, `isWorking`, `isWinner`,
+  `remainingReward`, `isFunded`.
 
-Once someone is working the creator can no longer withdraw — the only way to
-move the money is to accept one worker. See
+Once someone is working the creator can no longer withdraw the pool — the only
+ways to move money are accepting workers or finalizing. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#worker-incentives-read-this-before-shipping)
 for the worker-incentive tradeoffs.
 

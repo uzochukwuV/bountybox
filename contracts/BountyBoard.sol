@@ -7,8 +7,12 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 
 /// @title BountyBoard
 /// @notice USDC escrow and rule enforcement for a micro-task bounty platform.
-/// @dev Bounties are open to many workers: anyone may mark themselves as
-///      working, and the creator accepts any one of them and pays that worker.
+/// @dev Bounties are open to many workers and can pay up to `maxWinners` of
+///      them. A pure single-winner bounty is simply `maxWinners == 1`; a
+///      multi-winner bounty pays a flat `rewardPerWinner` to each accepted
+///      worker. Anyone may mark themselves as working, and the creator accepts
+///      whomever they choose, up to the cap.
+///
 ///      The contract is intentionally small: it custodies funds and records the
 ///      value-bearing facts of a bounty's lifecycle. All human-readable content
 ///      (title, description, attachments, comments, submissions) lives offchain
@@ -17,11 +21,11 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 ///      hashes and to display who is working.
 ///
 ///      Lifecycle:
-///        createBounty  -> Open      (reward escrowed)
+///        createBounty  -> Open      (reward escrowed = rewardPerWinner * maxWinners)
 ///        startWorking  -> Open      (any worker, before the application deadline)
-///        cancelBounty  -> Cancelled (creator, only while no one is working)
-///        approveWork   -> Completed (creator accepts one worker and pays them)
-///        expireBounty  -> Expired   (refund; permissionless safety valve)
+///        approveWork   -> Open      (creator accepts a worker; may be called up to maxWinners times)
+///        cancelBounty  -> Cancelled (creator, only while no one is working and none paid)
+///        expireBounty  -> Expired   (refund of any unspent escrow; permissionless)
 contract BountyBoard is ReentrancyGuard {
   using SafeERC20 for IERC20;
 
@@ -30,10 +34,10 @@ contract BountyBoard is ReentrancyGuard {
   // ---------------------------------------------------------------------------
 
   enum Status {
-    Open, // funded; workers may start, creator may cancel or accept one
-    Completed, // creator accepted a worker's work and paid the reward
-    Cancelled, // refunded to the creator because no one was working
-    Expired // refunded to the creator via the permissionless safety valve
+    Open, // funded; workers may start, creator may cancel, accept, or finish
+    Completed, // maxWinners reached (or closed after paying at least one)
+    Cancelled, // fully refunded to the creator (nobody worked, nobody paid)
+    Expired // refunded unspent escrow to the creator via the safety valve
   }
 
   struct Bounty {
@@ -41,11 +45,13 @@ contract BountyBoard is ReentrancyGuard {
     uint64 applicationDeadline; // last timestamp a worker may start working
     uint64 submissionDeadline; // when submissions are expected by
     Status status;
-    uint256 reward; // USDC amount held in escrow (6-decimal base units)
+    uint32 maxWinners; // maximum number of paid winners
+    uint32 winnerCount; // number of winners paid so far
     uint32 workerCount; // number of distinct workers who started
-    address winningWorker; // worker whose work was accepted (once completed)
+    uint256 rewardPerWinner; // USDC paid to each winner (6-decimal base units)
     bytes32 contentHash; // offchain metadata root (title, description, files)
-    bytes32 winningSubmissionRef; // accepted submission reference/hash
+    address[] workers; // workers who marked themselves as working
+    address[] winners; // workers whose work was accepted and paid
   }
 
   // ---------------------------------------------------------------------------
@@ -57,7 +63,7 @@ contract BountyBoard is ReentrancyGuard {
   IERC20 public immutable usdc;
 
   /// @notice Grace period after `submissionDeadline` during which the creator
-  ///         can still accept a worker before anyone may expire the bounty.
+  ///         can still accept workers before anyone may expire the bounty.
   uint64 public immutable reviewPeriod;
 
   /// @notice Number of bounties ever created; also the id of the next bounty.
@@ -68,8 +74,8 @@ contract BountyBoard is ReentrancyGuard {
   /// @notice Whether `worker` has marked themselves as working on bounty `id`.
   mapping(uint256 id => mapping(address worker => bool)) public isWorking;
 
-  /// @notice Enumerable list of workers per bounty, for onchain discovery.
-  mapping(uint256 id => address[] workers) private _workers;
+  /// @notice Whether `worker` has already been paid on bounty `id`.
+  mapping(uint256 id => mapping(address worker => bool)) public isWinner;
 
   // ---------------------------------------------------------------------------
   // Events (bounty lifecycle)
@@ -78,18 +84,20 @@ contract BountyBoard is ReentrancyGuard {
   event BountyCreated(
     uint256 indexed id,
     address indexed creator,
-    uint256 reward,
+    uint256 rewardPerWinner,
+    uint32 maxWinners,
     uint64 applicationDeadline,
     uint64 submissionDeadline,
     bytes32 contentHash
   );
   event WorkStarted(uint256 indexed id, address indexed worker);
-  event BountyCompleted(
+  event BountyWinnerPaid(
     uint256 indexed id,
     address indexed worker,
     uint256 amount,
     bytes32 submissionRef
   );
+  event BountyCompleted(uint256 indexed id);
   event BountyCancelled(uint256 indexed id, address indexed creator, uint256 refund);
   event BountyExpired(uint256 indexed id, address indexed creator, uint256 refund);
 
@@ -98,6 +106,7 @@ contract BountyBoard is ReentrancyGuard {
   // ---------------------------------------------------------------------------
 
   error ZeroReward();
+  error InvalidWinners();
   error InvalidDeadlines();
   error InvalidReviewPeriod();
   error ZeroAddress();
@@ -108,8 +117,11 @@ contract BountyBoard is ReentrancyGuard {
   error AlreadyWorking();
   error CreatorCannotWork();
   error NotWorking();
+  error AlreadyWinner();
+  error MaxWinnersReached();
   error ExpiryNotReached();
   error WorkersPresent();
+  error NothingPaid();
 
   // ---------------------------------------------------------------------------
   // Modifiers
@@ -143,20 +155,24 @@ contract BountyBoard is ReentrancyGuard {
   // Creator flow
   // ---------------------------------------------------------------------------
 
-  /// @notice Creates a funded bounty. The reward is pulled into escrow at once.
-  /// @param reward USDC amount in 6-decimal base units.
+  /// @notice Creates a funded bounty. Escrow = rewardPerWinner * maxWinners,
+  ///         pulled in at once.
+  /// @param rewardPerWinner USDC paid per winner, in 6-decimal base units.
+  /// @param maxWinners Maximum number of paid winners; 1 for a classic bounty.
   /// @param applicationDeadline Last timestamp a worker may start working.
   /// @param submissionDeadline When submissions are expected by; must be after
   ///        `applicationDeadline`.
   /// @param contentHash Hash/root of the offchain task content.
   /// @return id The new bounty id.
   function createBounty(
-    uint256 reward,
+    uint256 rewardPerWinner,
+    uint32 maxWinners,
     uint64 applicationDeadline,
     uint64 submissionDeadline,
     bytes32 contentHash
   ) external nonReentrant returns (uint256 id) {
-    if (reward == 0) revert ZeroReward();
+    if (rewardPerWinner == 0) revert ZeroReward();
+    if (maxWinners == 0) revert InvalidWinners();
     if (applicationDeadline < block.timestamp || submissionDeadline <= applicationDeadline) {
       revert InvalidDeadlines();
     }
@@ -164,31 +180,33 @@ contract BountyBoard is ReentrancyGuard {
     id = bountyCount++;
     Bounty storage b = _bounties[id];
     b.creator = msg.sender;
-    b.reward = reward;
+    b.rewardPerWinner = rewardPerWinner;
+    b.maxWinners = maxWinners;
     b.applicationDeadline = applicationDeadline;
     b.submissionDeadline = submissionDeadline;
     b.status = Status.Open;
     b.contentHash = contentHash;
 
-    // Pull funds into escrow before the bounty is considered live.
-    usdc.safeTransferFrom(msg.sender, address(this), reward);
+    // Pull the full prize pool into escrow before the bounty is live.
+    uint256 escrow = rewardPerWinner * maxWinners;
+    usdc.safeTransferFrom(msg.sender, address(this), escrow);
 
     emit BountyCreated(
       id,
       msg.sender,
-      reward,
+      rewardPerWinner,
+      maxWinners,
       applicationDeadline,
       submissionDeadline,
       contentHash
     );
   }
 
-  /// @notice Accepts one worker's work and pays them the reward. Creator-only.
+  /// @notice Accepts one worker's work and pays them. Creator-only; may be
+  ///         called repeatedly until `maxWinners` is reached.
   /// @dev The worker must have marked themselves as working, so the creator
   ///      cannot pay an arbitrary address and the set of potential recipients
   ///      stays bounded and visible onchain.
-  /// @param worker The worker whose work is accepted.
-  /// @param submissionRef Hash of the accepted offchain submission.
   function approveWork(
     uint256 id,
     address worker,
@@ -197,26 +215,44 @@ contract BountyBoard is ReentrancyGuard {
     Bounty storage b = _bounties[id];
     if (b.status != Status.Open) revert WrongStatus();
     if (!isWorking[id][worker]) revert NotWorking();
+    if (isWinner[id][worker]) revert AlreadyWinner();
+    if (b.winnerCount >= b.maxWinners) revert MaxWinnersReached();
 
-    uint256 amount = b.reward;
-    b.reward = 0;
-    b.status = Status.Completed;
-    b.winningWorker = worker;
-    b.winningSubmissionRef = submissionRef;
+    isWinner[id][worker] = true;
+    b.winners.push(worker);
+    b.winnerCount += 1;
 
-    usdc.safeTransfer(worker, amount);
-    emit BountyCompleted(id, worker, amount, submissionRef);
+    usdc.safeTransfer(worker, b.rewardPerWinner);
+
+    emit BountyWinnerPaid(id, worker, b.rewardPerWinner, submissionRef);
+
+    if (b.winnerCount == b.maxWinners) {
+      b.status = Status.Completed;
+      emit BountyCompleted(id);
+    }
   }
 
-  /// @notice Withdraws the reward when no one is working on the bounty.
-  ///         Creator-only.
+  /// @notice Closes the bounty early once at least one winner is paid, and
+  ///         refunds the remaining unspent prize pool to the creator.
+  function finalizeBounty(uint256 id) external existing(id) onlyCreator(id) nonReentrant {
+    Bounty storage b = _bounties[id];
+    if (b.status != Status.Open) revert WrongStatus();
+    if (b.winnerCount == 0) revert NothingPaid();
+
+    uint256 refund = b.rewardPerWinner * (b.maxWinners - b.winnerCount);
+    b.status = Status.Completed;
+
+    usdc.safeTransfer(b.creator, refund);
+    emit BountyCompleted(id);
+  }
+
+  /// @notice Withdraws the full reward when no one is working. Creator-only.
   function cancelBounty(uint256 id) external existing(id) onlyCreator(id) nonReentrant {
     Bounty storage b = _bounties[id];
     if (b.status != Status.Open) revert WrongStatus();
     if (b.workerCount != 0) revert WorkersPresent();
 
-    uint256 refund = b.reward;
-    b.reward = 0;
+    uint256 refund = b.rewardPerWinner * b.maxWinners;
     b.status = Status.Cancelled;
 
     usdc.safeTransfer(b.creator, refund);
@@ -237,8 +273,8 @@ contract BountyBoard is ReentrancyGuard {
     if (isWorking[id][msg.sender]) revert AlreadyWorking();
 
     isWorking[id][msg.sender] = true;
-    _workers[id].push(msg.sender);
-    b.workerCount = uint32(_workers[id].length);
+    b.workers.push(msg.sender);
+    b.workerCount = uint32(b.workers.length);
 
     emit WorkStarted(id, msg.sender);
   }
@@ -247,21 +283,23 @@ contract BountyBoard is ReentrancyGuard {
   // Permissionless maintenance
   // ---------------------------------------------------------------------------
 
-  /// @notice Refunds a stuck bounty to its creator. Callable by anyone.
-  /// @dev Two cases that would otherwise lock funds:
-  ///      - no one started working and the application deadline passed;
-  ///      - the creator never accepted anyone within the review grace period.
-  ///      Funds always return to the creator.
+  /// @notice Refunds unspent escrow to the creator. Callable by anyone.
+  /// @dev Covers three cases that would otherwise lock funds:
+  ///      - the creator never accepted anyone and nobody is working;
+  ///      - the creator accepted fewer than `maxWinners` and stopped;
+  ///      - a worker-dominated bounty was never resolved by the creator.
+  ///      Already-paid winners keep their rewards; only the remainder is
+  ///      refunded.
   function expireBounty(uint256 id) external existing(id) nonReentrant {
     Bounty storage b = _bounties[id];
     if (b.status != Status.Open) revert WrongStatus();
 
-    bool abandoned = b.workerCount == 0 && block.timestamp > b.applicationDeadline;
+    bool liveWorkers = b.workerCount > 0 && b.winnerCount < b.maxWinners;
+    bool pastDeadline = block.timestamp > b.applicationDeadline;
     bool creatorSilent = block.timestamp > uint256(b.submissionDeadline) + reviewPeriod;
-    if (!abandoned && !creatorSilent) revert ExpiryNotReached();
+    if (!(pastDeadline && (!liveWorkers || creatorSilent))) revert ExpiryNotReached();
 
-    uint256 refund = b.reward;
-    b.reward = 0;
+    uint256 refund = b.rewardPerWinner * (b.maxWinners - b.winnerCount);
     b.status = Status.Expired;
 
     usdc.safeTransfer(b.creator, refund);
@@ -279,10 +317,22 @@ contract BountyBoard is ReentrancyGuard {
 
   /// @notice Returns every worker who marked themselves as working on `id`.
   function getWorkers(uint256 id) external view existing(id) returns (address[] memory) {
-    return _workers[id];
+    return _bounties[id].workers;
   }
 
-  /// @notice True when the reward is still held in escrow for `id`.
+  /// @notice Returns every worker who has been accepted and paid on `id`.
+  function getWinners(uint256 id) external view existing(id) returns (address[] memory) {
+    return _bounties[id].winners;
+  }
+
+  /// @notice USDC still held in escrow for unclaimed winner slots.
+  function remainingReward(uint256 id) external view existing(id) returns (uint256) {
+    Bounty storage b = _bounties[id];
+    if (b.status != Status.Open) return 0;
+    return b.rewardPerWinner * (b.maxWinners - b.winnerCount);
+  }
+
+  /// @notice True while the reward is still held in escrow for `id`.
   function isFunded(uint256 id) external view existing(id) returns (bool) {
     return _bounties[id].status == Status.Open;
   }
