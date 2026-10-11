@@ -49,21 +49,22 @@ records and notifications. None of this is required to move funds.
 
 ```
                  createBounty (funds escrowed)
-                          │
-                          ▼
-   cancelBounty ───────► Open ◄──── expireBounty (deadline passed, no worker)
-     (creator)            │                     (anyone; refund → creator)
-                          │ assignWorker (creator, before app. deadline)
-                          ▼
-                      Assigned
-                          │ submitWork (worker, before submission deadline)
-                          ▼
-                     Submitted ────────── approveWork (creator) ──► Completed
-                          │                                          (pay → worker)
-                          │ claimUnreviewed (worker, after reviewPeriod)
-                          ▼
+                          |
+                          v
+   cancelBounty -------> Open <---- expireBounty (app. deadline passed, no worker)
+     (creator)            |                  (anyone; refund -> creator)
+                          | assignWorker (creator, before app. deadline)
+                          v
+                      Assigned --- expireBounty (submission deadline passed,
+                          |        no delivery) (anyone; refund -> creator)
+                          | submitWork (worker, before submission deadline)
+                          v
+                     Submitted -------- approveWork (creator) --> Completed
+                          |                                      (pay -> worker)
+                          | claimUnreviewed (worker, after reviewPeriod)
+                          v
                       Reclaimed
-                       (pay → worker)
+                       (pay -> worker)
 ```
 
 - Funds leave escrow only in `Completed`, `Reclaimed`, `Cancelled`, or `Expired`.
@@ -73,13 +74,17 @@ records and notifications. None of this is required to move funds.
 - If a creator goes silent after submission, the worker can self-pay via
   `claimUnreviewed` once `reviewPeriod` elapses. This removes the creator as a
   single point of failure without giving the worker the funds immediately.
+- Every state has an exit, so funds can never be locked: `Open` and `Assigned`
+  bounties can be refunded through `expireBounty` once their deadline passes,
+  and `Submitted` bounties can always be resolved via `approveWork` or
+  `claimUnreviewed`.
 
 ## Nostr / offchain indexer expectations
 
-A backend watches the contract's events (`BountyCreated`, `BountyFunded`,
-`WorkerAssigned`, `WorkSubmitted`, `BountyCompleted`, `BountyCancelled`,
-`BountyExpired`, `BountyReclaimed`) and writes the projected lifecycle into the
-database. Bounty `id` is the join key between the chain and the `bounty` table.
+A backend watches the contract's events (`BountyCreated`, `WorkerAssigned`,
+`WorkSubmitted`, `BountyCompleted`, `BountyCancelled`, `BountyExpired`,
+`BountyReclaimed`) and writes the projected lifecycle into the database. Bounty
+`id` is the join key between the chain and the `bounty` table.
 
 ## USDC on Arc
 

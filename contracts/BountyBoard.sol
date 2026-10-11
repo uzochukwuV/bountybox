@@ -20,7 +20,9 @@ contract BountyBoard is ReentrancyGuard {
   // Types
   // ---------------------------------------------------------------------------
 
-  /// @dev Lifecycle of a bounty. Money moves only out of Open and Submitted.
+  /// @dev Lifecycle of a bounty. Money moves out of Open, Assigned and
+  ///      Submitted: Open via cancel/expire, Assigned via expire after the
+  ///      submission deadline, Submitted via approve/claim.
   enum Status {
     Open, // funded, accepting applications
     Assigned, // a worker has been assigned, work in progress
@@ -72,7 +74,6 @@ contract BountyBoard is ReentrancyGuard {
     uint64 submissionDeadline,
     bytes32 contentHash
   );
-  event BountyFunded(uint256 indexed id, address indexed creator, uint256 amount);
   event WorkerAssigned(uint256 indexed id, address indexed worker);
   event WorkSubmitted(uint256 indexed id, address indexed worker, bytes32 submissionRef);
   event BountyCompleted(uint256 indexed id, address indexed worker, uint256 amount);
@@ -93,6 +94,7 @@ contract BountyBoard is ReentrancyGuard {
   error NotWorker();
   error WrongStatus();
   error ApplicationsClosed();
+  error SubmissionOpen();
   error SubmissionsClosed();
   error ReviewWindowOpen();
   error WorkerIsCreator();
@@ -171,7 +173,6 @@ contract BountyBoard is ReentrancyGuard {
       submissionDeadline,
       contentHash
     );
-    emit BountyFunded(id, msg.sender, reward);
   }
 
   /// @notice Assigns an applicant as the worker. Creator-only, while Open.
@@ -262,12 +263,20 @@ contract BountyBoard is ReentrancyGuard {
   // Permissionless maintenance
   // ---------------------------------------------------------------------------
 
-  /// @notice Refunds a bounty whose application deadline passed with no worker.
-  ///         Callable by anyone; funds always return to the creator.
+  /// @notice Refunds a stuck bounty to its creator. Callable by anyone.
+  /// @dev Covers two cases that would otherwise lock funds forever:
+  ///      - Open and the application deadline passed with no worker;
+  ///      - Assigned and the submission deadline passed with no delivery.
+  ///      In both cases funds always return to the creator.
   function expireBounty(uint256 id) external existing(id) nonReentrant {
     Bounty storage b = _bounties[id];
-    if (b.status != Status.Open) revert WrongStatus();
-    if (block.timestamp <= b.applicationDeadline) revert ApplicationsClosed();
+    if (b.status == Status.Open) {
+      if (block.timestamp <= b.applicationDeadline) revert ApplicationsClosed();
+    } else if (b.status == Status.Assigned) {
+      if (block.timestamp <= b.submissionDeadline) revert SubmissionOpen();
+    } else {
+      revert WrongStatus();
+    }
 
     uint256 refund = b.reward;
     b.reward = 0;

@@ -13,11 +13,17 @@ and a safety valve that lets a worker reclaim pay if the creator never reviews.
 
 ```
 createBounty ──► Open ──assignWorker──► Assigned ──submitWork──► Submitted
-                │ │                                              │      │
-   cancelBounty │ └──expireBounty──► Expired (refund)            │      └─approveWork─► Completed (pay)
-   (refund)     ▼                                                │
-            Cancelled (refund)                 claimUnreviewed ◄─┘  Reclaimed (pay)
+                 │ │                      │                       │      │
+   cancelBounty  │ └─expireBounty─►        └─expireBounty─►        │      └─approveWork─► Completed (pay)
+   (refund)      │   Expired (refund)        Expired (refund)      │
+                 ▼                                                  │
+            Cancelled (refund)                  claimUnreviewed ◄───┘  Reclaimed (pay)
 ```
+
+Every state has an exit, so escrowed funds can never be locked: `Open` and
+`Assigned` bounties are refunded to the creator via `expireBounty` once their
+deadline passes, and `Submitted` bounties always resolve via `approveWork` or
+`claimUnreviewed`.
 
 - Creator: `createBounty`, `assignWorker`, `approveWork`, `cancelBounty`.
 - Worker: `submitWork`, `claimUnreviewed`.

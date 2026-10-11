@@ -68,7 +68,7 @@ contract BountyBoardTest is Test {
 
   function test_CreateEmitsFundedEvent() public {
     vm.expectEmit(true, true, false, true, address(board));
-    emit BountyBoard.BountyFunded(0, creator, REWARD);
+    emit BountyBoard.BountyCreated(0, creator, REWARD, uint64(block.timestamp + 1 days), uint64(block.timestamp + 2 days), bytes32("content"));
     _create();
   }
 
@@ -231,6 +231,34 @@ contract BountyBoardTest is Test {
   function test_ExpireBeforeDeadlineReverts() public {
     uint256 id = _create();
     vm.expectRevert(BountyBoard.ApplicationsClosed.selector);
+    board.expireBounty(id);
+  }
+
+  /// A worker who is assigned but never delivers must not lock the funds: once
+  /// the submission deadline passes, anyone can refund the creator.
+  function test_ExpireAssignedAfterSubmissionDeadlineRefunds() public {
+    uint256 id = _create();
+    _assign(id);
+
+    // still before the submission deadline -> cannot expire yet
+    vm.expectRevert(BountyBoard.SubmissionOpen.selector);
+    board.expireBounty(id);
+
+    vm.warp(block.timestamp + 2 days + 1);
+    vm.prank(stranger);
+    board.expireBounty(id);
+
+    assertEq(usdc.balanceOf(creator), 1_000e6);
+    assertEq(usdc.balanceOf(address(board)), 0);
+    assertEq(uint256(board.getBounty(id).status), uint256(BountyBoard.Status.Expired));
+  }
+
+  function test_ExpireSubmittedReverts() public {
+    uint256 id = _create();
+    _assign(id);
+    _submit(id);
+    vm.warp(block.timestamp + 100 days);
+    vm.expectRevert(BountyBoard.WrongStatus.selector);
     board.expireBounty(id);
   }
 

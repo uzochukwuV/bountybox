@@ -38,8 +38,8 @@ describe("BountyBoard", async function () {
         { account: creator.account },
       ),
       board,
-      "BountyFunded",
-      [0n, creator.account.address, REWARD],
+      "BountyCreated",
+      [0n, creator.account.address, REWARD, now + DAY, now + 2n * DAY, b32("11")],
     );
 
     // funds are held by the contract
@@ -116,6 +116,27 @@ describe("BountyBoard", async function () {
       board,
       "NotCreator",
     );
+  });
+
+  it("refunds the creator if the assigned worker never delivers", async function () {
+    const { creator, worker, usdc, board, now } = await networkHelpers.loadFixture(deploy);
+
+    await board.write.createBounty([REWARD, now + DAY, now + 2n * DAY, b32("00")], {
+      account: creator.account,
+    });
+    await board.write.assignWorker([0n, worker.account.address], {
+      account: creator.account,
+    });
+
+    const testClient = await viem.getTestClient();
+    await testClient.increaseTime({ seconds: Number(2n * DAY) + 1 });
+    await testClient.mine({ blocks: 1 });
+
+    await board.write.expireBounty([0n], { account: worker.account });
+
+    assert.equal(await board.read.getBounty([0n]).then((b) => b.status), 5); // Expired
+    assert.equal(await usdc.read.balanceOf([creator.account.address]), 1_000_000_000n);
+    assert.equal(await usdc.read.balanceOf([board.address]), 0n);
   });
 
   it("escrows the exact reward amount", async function () {
