@@ -6,11 +6,14 @@
 -- Rows link to the chain via bounty_id / content_hash / submission_ref.
 --
 -- An indexer watches the contract events and reconciles the cached lifecycle
--- columns (status, worker_address, reward_amount, deadlines, timestamps).
+-- columns (status, worker_count, winning_worker_wallet, reward_amount,
+-- deadlines, timestamps).
 
 CREATE TYPE bounty_status AS ENUM (
-  'open', 'assigned', 'submitted', 'completed', 'cancelled', 'expired', 'reclaimed'
+  'open', 'completed', 'cancelled', 'expired'
 );
+
+CREATE TYPE submission_status AS ENUM ('pending', 'accepted', 'rejected');
 
 -- ---------------------------------------------------------------------------
 -- Identity (content, not authority). Wallet address is the bridge to onchain.
@@ -43,13 +46,14 @@ CREATE TABLE tasks (
   category             TEXT,
   instructions         TEXT,
   -- Mirrored from chain by the indexer (display + filtering only):
-  worker_wallet        TEXT,
   reward_amount        NUMERIC(78, 0),         -- USDC base units (6 decimals)
   application_deadline TIMESTAMPTZ,
   submission_deadline  TIMESTAMPTZ,
   status               bounty_status,
+  worker_count         INT NOT NULL DEFAULT 0, -- distinct workers who started
+  winning_worker_wallet TEXT,                  -- who got paid (on completion)
+  winning_submission_id BIGINT,                -- FK added after submissions table
   chain_tx_hash        TEXT,                   -- creation tx
-  submitted_at         TIMESTAMPTZ,
   created_at           TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -57,6 +61,17 @@ CREATE TABLE tasks (
 CREATE INDEX tasks_status_idx ON tasks (status);
 CREATE INDEX tasks_category_idx ON tasks (category);
 CREATE INDEX tasks_creator_idx ON tasks (creator_wallet);
+
+-- The onchain "working on it" set. One row per (task, worker). Populated from
+-- WorkStarted events so the UI can show "N working" without replaying logs.
+CREATE TABLE bounty_workers (
+  task_id       BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  worker_wallet TEXT NOT NULL REFERENCES users(wallet),
+  started_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (task_id, worker_wallet)
+);
+
+CREATE INDEX bounty_workers_task_idx ON bounty_workers (task_id);
 
 -- Large/binary content lives in object storage; we keep references + metadata.
 CREATE TABLE task_attachments (
@@ -70,18 +85,25 @@ CREATE TABLE task_attachments (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Full work submissions. submission_ref matches Bounty.submissionRef onchain.
+-- Full work submissions. One per worker attempt; the winner's submission_ref
+-- matches Bounty.winningSubmissionRef onchain.
 CREATE TABLE submissions (
   id             BIGSERIAL PRIMARY KEY,
   task_id        BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
   worker_wallet  TEXT NOT NULL REFERENCES users(wallet),
-  submission_ref BYTEA UNIQUE,                 -- matches onchain submissionRef
+  submission_ref BYTEA UNIQUE,                 -- optional onchain anchor
   body           TEXT,                         -- full write-up
-  status         TEXT NOT NULL DEFAULT 'pending', -- pending|approved|rejected
-  submitted_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+  status         submission_status NOT NULL DEFAULT 'pending',
+  submitted_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (task_id, worker_wallet)
 );
 
 CREATE INDEX submissions_task_idx ON submissions (task_id);
+
+-- Enforce the tasks.winning_submission_id FK now that submissions exists.
+ALTER TABLE tasks
+  ADD CONSTRAINT tasks_winning_submission_fk
+  FOREIGN KEY (winning_submission_id) REFERENCES submissions(id) ON DELETE SET NULL;
 
 CREATE TABLE submission_attachments (
   id            BIGSERIAL PRIMARY KEY,
@@ -134,7 +156,7 @@ CREATE TABLE notifications (
   id             BIGSERIAL PRIMARY KEY,
   user_wallet    TEXT NOT NULL REFERENCES users(wallet),
   task_id        BIGINT REFERENCES tasks(id) ON DELETE CASCADE,
-  kind           TEXT NOT NULL,                -- assigned|submitted|approved|...
+  kind           TEXT NOT NULL,                -- started|accepted|completed|cancelled|expired
   payload        JSONB NOT NULL DEFAULT '{}',
   read_at        TIMESTAMPTZ,
   created_at     TIMESTAMPTZ NOT NULL DEFAULT now()

@@ -10,7 +10,8 @@ contract BountyBoardTest is Test {
   BountyBoard internal board;
 
   address internal creator = makeAddr("creator");
-  address internal worker = makeAddr("worker");
+  address internal alice = makeAddr("alice");
+  address internal bob = makeAddr("bob");
   address internal stranger = makeAddr("stranger");
 
   uint256 internal constant REWARD = 100e6; // 100 USDC (6 decimals)
@@ -35,16 +36,6 @@ contract BountyBoardTest is Test {
     );
   }
 
-  function _assign(uint256 id) internal {
-    vm.prank(creator);
-    board.assignWorker(id, worker);
-  }
-
-  function _submit(uint256 id) internal {
-    vm.prank(worker);
-    board.submitWork(id, bytes32("submission"));
-  }
-
   // ---------------------------------------------------------------------------
   // Creation
   // ---------------------------------------------------------------------------
@@ -62,14 +53,8 @@ contract BountyBoardTest is Test {
     assertEq(b.creator, creator);
     assertEq(b.reward, REWARD);
     assertEq(uint256(b.status), uint256(BountyBoard.Status.Open));
-    assertEq(b.contentHash, bytes32("content"));
+    assertEq(b.workerCount, 0);
     assertTrue(board.isFunded(id));
-  }
-
-  function test_CreateEmitsFundedEvent() public {
-    vm.expectEmit(true, true, false, true, address(board));
-    emit BountyBoard.BountyCreated(0, creator, REWARD, uint64(block.timestamp + 1 days), uint64(block.timestamp + 2 days), bytes32("content"));
-    _create();
   }
 
   function test_CreateRevertsOnZeroReward() public {
@@ -81,7 +66,6 @@ contract BountyBoardTest is Test {
   function test_CreateRevertsWhenDeadlinesInvalid() public {
     vm.prank(creator);
     vm.expectRevert(BountyBoard.InvalidDeadlines.selector);
-    // submission deadline not after application deadline
     board.createBounty(REWARD, uint64(block.timestamp + 2 days), uint64(block.timestamp + 1 days), 0);
   }
 
@@ -93,112 +77,125 @@ contract BountyBoardTest is Test {
   }
 
   // ---------------------------------------------------------------------------
-  // Assignment
+  // startWorking (the "working on it" button)
   // ---------------------------------------------------------------------------
 
-  function test_AssignWorker() public {
+  function test_StartWorkingRegistersWorker() public {
     uint256 id = _create();
-    _assign(id);
+    vm.prank(alice);
+    board.startWorking(id);
 
-    BountyBoard.Bounty memory b = board.getBounty(id);
-    assertEq(b.worker, worker);
-    assertEq(uint256(b.status), uint256(BountyBoard.Status.Assigned));
+    assertTrue(board.isWorking(id, alice));
+    assertEq(board.getBounty(id).workerCount, 1);
+    assertEq(board.getWorkers(id).length, 1);
+    assertEq(board.getWorkers(id)[0], alice);
   }
 
-  function test_AssignOnlyCreator() public {
+  function test_MultipleWorkersCanStart() public {
     uint256 id = _create();
-    vm.prank(stranger);
-    vm.expectRevert(BountyBoard.NotCreator.selector);
-    board.assignWorker(id, worker);
+    vm.prank(alice);
+    board.startWorking(id);
+    vm.prank(bob);
+    board.startWorking(id);
+
+    assertEq(board.getBounty(id).workerCount, 2);
+    address[] memory ws = board.getWorkers(id);
+    assertEq(ws.length, 2);
+    assertEq(ws[0], alice);
+    assertEq(ws[1], bob);
   }
 
-  function test_AssignRejectsCreatorAsWorker() public {
+  function test_StartWorkingTwiceReverts() public {
+    uint256 id = _create();
+    vm.prank(alice);
+    board.startWorking(id);
+    vm.prank(alice);
+    vm.expectRevert(BountyBoard.AlreadyWorking.selector);
+    board.startWorking(id);
+  }
+
+  function test_CreatorCannotStartWorking() public {
     uint256 id = _create();
     vm.prank(creator);
-    vm.expectRevert(BountyBoard.WorkerIsCreator.selector);
-    board.assignWorker(id, creator);
+    vm.expectRevert(BountyBoard.CreatorCannotWork.selector);
+    board.startWorking(id);
   }
 
-  function test_AssignAfterDeadlineReverts() public {
+  function test_StartWorkingAfterDeadlineReverts() public {
     uint256 id = _create();
     vm.warp(block.timestamp + 1 days + 1);
-    vm.prank(creator);
+    vm.prank(alice);
     vm.expectRevert(BountyBoard.ApplicationsClosed.selector);
-    board.assignWorker(id, worker);
+    board.startWorking(id);
+  }
+
+  function test_StartWorkingEmitsEvent() public {
+    uint256 id = _create();
+    vm.expectEmit(true, true, false, false, address(board));
+    emit BountyBoard.WorkStarted(id, alice);
+    vm.prank(alice);
+    board.startWorking(id);
   }
 
   // ---------------------------------------------------------------------------
-  // Submission
+  // approveWork (creator accepts any worker who started)
   // ---------------------------------------------------------------------------
 
-  function test_SubmitRecordsReference() public {
+  function test_ApproveAnyWorkerPaysThem() public {
     uint256 id = _create();
-    _assign(id);
-    _submit(id);
+    vm.prank(alice);
+    board.startWorking(id);
+    vm.prank(bob);
+    board.startWorking(id);
+
+    vm.prank(creator);
+    board.approveWork(id, bob, bytes32("bob-submission"));
+
+    assertEq(usdc.balanceOf(bob), REWARD);
+    assertEq(usdc.balanceOf(alice), 0);
+    assertEq(usdc.balanceOf(address(board)), 0);
 
     BountyBoard.Bounty memory b = board.getBounty(id);
-    assertEq(b.submissionRef, bytes32("submission"));
-    assertEq(b.submittedAt, uint64(block.timestamp));
-    assertEq(uint256(b.status), uint256(BountyBoard.Status.Submitted));
-  }
-
-  function test_SubmitOnlyWorker() public {
-    uint256 id = _create();
-    _assign(id);
-    vm.prank(stranger);
-    vm.expectRevert(BountyBoard.NotWorker.selector);
-    board.submitWork(id, bytes32("x"));
-  }
-
-  function test_SubmitAfterDeadlineReverts() public {
-    uint256 id = _create();
-    _assign(id);
-    vm.warp(block.timestamp + 2 days + 1);
-    vm.prank(worker);
-    vm.expectRevert(BountyBoard.SubmissionsClosed.selector);
-    board.submitWork(id, bytes32("x"));
-  }
-
-  // ---------------------------------------------------------------------------
-  // Approval / payout
-  // ---------------------------------------------------------------------------
-
-  function test_ApprovePaysWorker() public {
-    uint256 id = _create();
-    _assign(id);
-    _submit(id);
-
-    vm.prank(creator);
-    board.approveWork(id);
-
-    assertEq(usdc.balanceOf(worker), REWARD);
-    assertEq(usdc.balanceOf(address(board)), 0);
-    assertEq(uint256(board.getBounty(id).status), uint256(BountyBoard.Status.Completed));
+    assertEq(uint256(b.status), uint256(BountyBoard.Status.Completed));
+    assertEq(b.winningWorker, bob);
+    assertEq(b.winningSubmissionRef, bytes32("bob-submission"));
     assertFalse(board.isFunded(id));
   }
 
   function test_ApproveOnlyCreator() public {
     uint256 id = _create();
-    _assign(id);
-    _submit(id);
-    vm.prank(worker);
+    vm.prank(alice);
+    board.startWorking(id);
+    vm.prank(stranger);
     vm.expectRevert(BountyBoard.NotCreator.selector);
-    board.approveWork(id);
+    board.approveWork(id, alice, bytes32("s"));
   }
 
-  function test_ApproveRequiresSubmitted() public {
+  function test_ApproveNonWorkerReverts() public {
     uint256 id = _create();
-    _assign(id);
+    vm.prank(alice);
+    board.startWorking(id);
+    vm.prank(creator);
+    vm.expectRevert(BountyBoard.NotWorking.selector);
+    board.approveWork(id, bob, bytes32("s"));
+  }
+
+  function test_ApproveTwiceReverts() public {
+    uint256 id = _create();
+    vm.prank(alice);
+    board.startWorking(id);
+    vm.prank(creator);
+    board.approveWork(id, alice, bytes32("s"));
     vm.prank(creator);
     vm.expectRevert(BountyBoard.WrongStatus.selector);
-    board.approveWork(id);
+    board.approveWork(id, alice, bytes32("s2"));
   }
 
   // ---------------------------------------------------------------------------
-  // Cancel / expire
+  // cancelBounty (only when nobody is working)
   // ---------------------------------------------------------------------------
 
-  function test_CancelRefundsCreator() public {
+  function test_CancelWithNoWorkersRefunds() public {
     uint256 id = _create();
     uint256 before = usdc.balanceOf(creator);
     vm.prank(creator);
@@ -208,19 +205,54 @@ contract BountyBoardTest is Test {
     assertEq(uint256(board.getBounty(id).status), uint256(BountyBoard.Status.Cancelled));
   }
 
-  function test_CancelAfterAssignmentReverts() public {
+  function test_CancelWithWorkersPresentReverts() public {
     uint256 id = _create();
-    _assign(id);
+    vm.prank(alice);
+    board.startWorking(id);
     vm.prank(creator);
-    vm.expectRevert(BountyBoard.WrongStatus.selector);
+    vm.expectRevert(BountyBoard.WorkersPresent.selector);
     board.cancelBounty(id);
   }
 
-  function test_ExpireRefundsAnyoneAfterDeadline() public {
+  function test_CancelOnlyCreator() public {
+    uint256 id = _create();
+    vm.prank(stranger);
+    vm.expectRevert(BountyBoard.NotCreator.selector);
+    board.cancelBounty(id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // expireBounty (safety valve)
+  // ---------------------------------------------------------------------------
+
+  function test_ExpireAbandonedWithNoWorkers() public {
     uint256 id = _create();
     vm.warp(block.timestamp + 1 days + 1);
+    vm.prank(stranger); // anyone may trigger the refund
+    board.expireBounty(id);
 
-    // anyone can trigger the refund; funds still go to the creator
+    assertEq(usdc.balanceOf(creator), 1_000e6);
+    assertEq(uint256(board.getBounty(id).status), uint256(BountyBoard.Status.Expired));
+  }
+
+  function test_ExpireWithWorkersBeforeReviewGraceReverts() public {
+    uint256 id = _create();
+    vm.prank(alice);
+    board.startWorking(id);
+
+    // after the app deadline but before the submission deadline + grace: a
+    // worker is present, so the bounty is not abandoned and can't expire yet.
+    vm.warp(block.timestamp + 1 days + 1);
+    vm.expectRevert(BountyBoard.ExpiryNotReached.selector);
+    board.expireBounty(id);
+  }
+
+  function test_ExpireWhenCreatorSilentAfterGrace() public {
+    uint256 id = _create();
+    vm.prank(alice);
+    board.startWorking(id);
+
+    vm.warp(block.timestamp + 2 days + REVIEW_PERIOD + 1);
     vm.prank(stranger);
     board.expireBounty(id);
 
@@ -228,70 +260,15 @@ contract BountyBoardTest is Test {
     assertEq(uint256(board.getBounty(id).status), uint256(BountyBoard.Status.Expired));
   }
 
-  function test_ExpireBeforeDeadlineReverts() public {
+  function test_ExpireCompletedReverts() public {
     uint256 id = _create();
-    vm.expectRevert(BountyBoard.ApplicationsClosed.selector);
-    board.expireBounty(id);
-  }
-
-  /// A worker who is assigned but never delivers must not lock the funds: once
-  /// the submission deadline passes, anyone can refund the creator.
-  function test_ExpireAssignedAfterSubmissionDeadlineRefunds() public {
-    uint256 id = _create();
-    _assign(id);
-
-    // still before the submission deadline -> cannot expire yet
-    vm.expectRevert(BountyBoard.SubmissionOpen.selector);
-    board.expireBounty(id);
-
-    vm.warp(block.timestamp + 2 days + 1);
-    vm.prank(stranger);
-    board.expireBounty(id);
-
-    assertEq(usdc.balanceOf(creator), 1_000e6);
-    assertEq(usdc.balanceOf(address(board)), 0);
-    assertEq(uint256(board.getBounty(id).status), uint256(BountyBoard.Status.Expired));
-  }
-
-  function test_ExpireSubmittedReverts() public {
-    uint256 id = _create();
-    _assign(id);
-    _submit(id);
+    vm.prank(alice);
+    board.startWorking(id);
+    vm.prank(creator);
+    board.approveWork(id, alice, bytes32("s"));
     vm.warp(block.timestamp + 100 days);
     vm.expectRevert(BountyBoard.WrongStatus.selector);
     board.expireBounty(id);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Reclaim after silent creator
-  // ---------------------------------------------------------------------------
-
-  function test_ClaimUnreviewedPaysWorkerAfterWindow() public {
-    uint256 id = _create();
-    _assign(id);
-    _submit(id);
-
-    // still inside the review window
-    vm.prank(worker);
-    vm.expectRevert(BountyBoard.ReviewWindowOpen.selector);
-    board.claimUnreviewed(id);
-
-    vm.warp(block.timestamp + REVIEW_PERIOD + 1);
-    vm.prank(worker);
-    board.claimUnreviewed(id);
-
-    assertEq(usdc.balanceOf(worker), REWARD);
-    assertEq(uint256(board.getBounty(id).status), uint256(BountyBoard.Status.Reclaimed));
-  }
-
-  function test_ClaimUnreviewedOnlyWorker() public {
-    uint256 id = _create();
-    _assign(id);
-    _submit(id);
-    vm.warp(block.timestamp + REVIEW_PERIOD + 1);
-    vm.prank(stranger);
-    vm.expectRevert(BountyBoard.NotWorker.selector);
-    board.claimUnreviewed(id);
   }
 
   // ---------------------------------------------------------------------------

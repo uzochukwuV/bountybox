@@ -15,11 +15,15 @@ hardhat.config.ts
 
 ## BountyBoard
 
-`contracts/BountyBoard.sol` is a USDC escrow + lifecycle contract for micro-task
-bounties. The chain holds money/permissions/rules and emits lifecycle events;
-the database (`db/schema.sql`) holds all content, linked by `contentHash` and
-`submissionRef`. Read `docs/ARCHITECTURE.md` before changing the contract: the
-onchain/offchain boundary is deliberate and drives the design.
+`contracts/BountyBoard.sol` is a USDC escrow + lifecycle contract for open,
+many-worker bounties. Anyone can `startWorking` (recorded onchain); the creator
+accepts one worker via `approveWork` and pays them; the creator can withdraw
+(`cancelBounty`) only while no one is working. The chain holds
+money/permissions/rules and emits lifecycle events; the database
+(`db/schema.sql`) holds all content, linked by `contentHash` and
+`winningSubmissionRef`. Read `docs/ARCHITECTURE.md` before changing the
+contract: the onchain/offchain boundary and the worker-incentive tradeoffs are
+deliberate and drive the design.
 
 - USDC amounts are 6-decimal base units (Arc's USDC ERC-20 interface).
 - Use custom errors, not string reverts, and `nonReentrant` on fund-moving fns.

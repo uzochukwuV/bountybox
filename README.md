@@ -7,27 +7,32 @@ the onchain/offchain split, and [db/schema.sql](db/schema.sql) for the schema.
 
 ## Contract
 
-`contracts/BountyBoard.sol` escrows USDC rewards and enforces the bounty
-lifecycle: create/fund, assign worker, submit work, approve/pay, cancel/expire,
-and a safety valve that lets a worker reclaim pay if the creator never reviews.
+`contracts/BountyBoard.sol` escrows USDC rewards for open, many-worker
+bounties: workers press "working on it" (recorded onchain), the creator accepts
+any one of them and pays that worker, and a permissionless safety valve
+guarantees refunds.
 
 ```
-createBounty ──► Open ──assignWorker──► Assigned ──submitWork──► Submitted
-                 │ │                      │                       │      │
-   cancelBounty  │ └─expireBounty─►        └─expireBounty─►        │      └─approveWork─► Completed (pay)
-   (refund)      │   Expired (refund)        Expired (refund)      │
-                 ▼                                                  │
-            Cancelled (refund)                  claimUnreviewed ◄───┘  Reclaimed (pay)
+createBounty ──► Open ──startWorking──► (workers register onchain)
+                 │ │
+   cancelBounty  │ │   (creator, only while workerCount == 0) ──► Cancelled (refund)
+   (refund)      │ │
+                 │ └─approveWork(worker) ──► Completed (pay -> that worker)
+                 │
+                 └─expireBounty ──► Expired (refund)
+                    · abandoned: nobody started, app deadline passed
+                    · creator silent: submissionDeadline + reviewPeriod passed
 ```
 
-Every state has an exit, so escrowed funds can never be locked: `Open` and
-`Assigned` bounties are refunded to the creator via `expireBounty` once their
-deadline passes, and `Submitted` bounties always resolve via `approveWork` or
-`claimUnreviewed`.
+- Creator: `createBounty`, `approveWork(id, worker, submissionRef)`, `cancelBounty`.
+- Worker: `startWorking(id)` — the UI's "working on it" button.
+- Anyone: `expireBounty(id)` (refund always goes to the creator).
+- Views: `getBounty`, `getWorkers`, `isWorking`, `isFunded`.
 
-- Creator: `createBounty`, `assignWorker`, `approveWork`, `cancelBounty`.
-- Worker: `submitWork`, `claimUnreviewed`.
-- Anyone: `expireBounty` (refund always goes to the creator).
+Once someone is working the creator can no longer withdraw — the only way to
+move the money is to accept one worker. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#worker-incentives-read-this-before-shipping)
+for the worker-incentive tradeoffs.
 
 Run the tests:
 

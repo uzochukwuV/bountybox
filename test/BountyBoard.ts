@@ -11,11 +11,14 @@ const DAY = 86_400n;
 // viem types byte params as `0x${string}`; build them explicitly.
 const b32 = (s: string) => `0x${s.repeat(32)}` as const;
 
+// Status enum indices, mirroring BountyBoard.Status.
+const Status = { Open: 0, Completed: 1, Cancelled: 2, Expired: 3 } as const;
+
 describe("BountyBoard", async function () {
   const { viem, networkHelpers } = await network.create();
 
   async function deploy() {
-    const [creator, worker, other] = await viem.getWalletClients();
+    const [creator, alice, bob] = await viem.getWalletClients();
     const publicClient = await viem.getPublicClient();
     const usdc = await viem.deployContract("MockUSDC");
     const board = await viem.deployContract("BountyBoard", [usdc.address, REVIEW_PERIOD]);
@@ -26,17 +29,16 @@ describe("BountyBoard", async function () {
     });
 
     const now = BigInt((await publicClient.getBlock()).timestamp);
-    return { creator, worker, other, usdc, board, now };
+    return { creator, alice, bob, usdc, board, now };
   }
 
-  it("runs the happy path: fund -> assign -> submit -> approve", async function () {
-    const { creator, worker, usdc, board, now } = await networkHelpers.loadFixture(deploy);
+  it("runs the bounty flow: create -> workers start -> creator accepts one", async function () {
+    const { creator, alice, bob, usdc, board, now } = await networkHelpers.loadFixture(deploy);
 
     await viem.assertions.emitWithArgs(
-      board.write.createBounty(
-        [REWARD, now + DAY, now + 2n * DAY, b32("11")],
-        { account: creator.account },
-      ),
+      board.write.createBounty([REWARD, now + DAY, now + 2n * DAY, b32("11")], {
+        account: creator.account,
+      }),
       board,
       "BountyCreated",
       [0n, creator.account.address, REWARD, now + DAY, now + 2n * DAY, b32("11")],
@@ -45,23 +47,31 @@ describe("BountyBoard", async function () {
     // funds are held by the contract
     assert.equal(await usdc.read.balanceOf([board.address]), REWARD);
 
-    await board.write.assignWorker([0n, worker.account.address], {
+    // two workers click "working on it" — both visible onchain
+    await board.write.startWorking([0n], { account: alice.account });
+    await board.write.startWorking([0n], { account: bob.account });
+
+    assert.equal(await board.read.getBounty([0n]).then((b) => b.workerCount), 2);
+    const workers = await board.read.getWorkers([0n]);
+    assert.deepEqual(
+      workers.map((w) => w.toLowerCase()),
+      [alice.account.address.toLowerCase(), bob.account.address.toLowerCase()],
+    );
+
+    // creator accepts bob's work and pays exactly one worker
+    await board.write.approveWork([0n, bob.account.address, b32("22")], {
       account: creator.account,
     });
-    await board.write.submitWork([0n, b32("22")], {
-      account: worker.account,
-    });
-    await board.write.approveWork([0n], { account: creator.account });
 
     const b = await board.read.getBounty([0n]);
-    assert.equal(b.status, 3); // Completed
-    assert.equal(b.worker.toLowerCase(), worker.account.address.toLowerCase());
-    assert.equal(await usdc.read.balanceOf([worker.account.address]), REWARD);
+    assert.equal(b.status, Status.Completed);
+    assert.equal(b.winningWorker.toLowerCase(), bob.account.address.toLowerCase());
+    assert.equal(await usdc.read.balanceOf([bob.account.address]), REWARD);
+    assert.equal(await usdc.read.balanceOf([alice.account.address]), 0n);
     assert.equal(await usdc.read.balanceOf([board.address]), 0n);
-    assert.equal(await board.read.isFunded([0n]), false);
   });
 
-  it("refunds the creator when an open bounty is cancelled", async function () {
+  it("lets the creator withdraw while nobody is working", async function () {
     const { creator, usdc, board, now } = await networkHelpers.loadFixture(deploy);
 
     await board.write.createBounty([REWARD, now + DAY, now + 2n * DAY, b32("00")], {
@@ -69,83 +79,76 @@ describe("BountyBoard", async function () {
     });
     await board.write.cancelBounty([0n], { account: creator.account });
 
-    const b = await board.read.getBounty([0n]);
-    assert.equal(b.status, 4); // Cancelled
+    assert.equal(await board.read.getBounty([0n]).then((b) => b.status), Status.Cancelled);
     assert.equal(await usdc.read.balanceOf([creator.account.address]), 1_000_000_000n);
   });
 
-  it("lets the worker reclaim the reward if the creator never reviews", async function () {
-    const { creator, worker, usdc, board, now } = await networkHelpers.loadFixture(deploy);
+  it("blocks the creator from withdrawing once someone is working", async function () {
+    const { creator, alice, board, now } = await networkHelpers.loadFixture(deploy);
 
     await board.write.createBounty([REWARD, now + DAY, now + 2n * DAY, b32("00")], {
       account: creator.account,
     });
-    await board.write.assignWorker([0n, worker.account.address], {
-      account: creator.account,
-    });
-    await board.write.submitWork([0n, b32("33")], {
-      account: worker.account,
-    });
-
-    const testClient = await viem.getTestClient();
-    await testClient.increaseTime({ seconds: Number(REVIEW_PERIOD) + 1 });
-    await testClient.mine({ blocks: 1 });
-
-    await board.write.claimUnreviewed([0n], { account: worker.account });
-
-    const b = await board.read.getBounty([0n]);
-    assert.equal(b.status, 6); // Reclaimed
-    assert.equal(await usdc.read.balanceOf([worker.account.address]), REWARD);
-  });
-
-  it("enforces creator-only approval", async function () {
-    const { creator, worker, board, now } = await networkHelpers.loadFixture(deploy);
-
-    await board.write.createBounty([REWARD, now + DAY, now + 2n * DAY, b32("00")], {
-      account: creator.account,
-    });
-    await board.write.assignWorker([0n, worker.account.address], {
-      account: creator.account,
-    });
-    await board.write.submitWork([0n, b32("44")], {
-      account: worker.account,
-    });
+    await board.write.startWorking([0n], { account: alice.account });
 
     await viem.assertions.revertWithCustomError(
-      board.write.approveWork([0n], { account: worker.account }),
+      board.write.cancelBounty([0n], { account: creator.account }),
       board,
-      "NotCreator",
+      "WorkersPresent",
     );
   });
 
-  it("refunds the creator if the assigned worker never delivers", async function () {
-    const { creator, worker, usdc, board, now } = await networkHelpers.loadFixture(deploy);
+  it("rejects approving someone who never started working", async function () {
+    const { creator, alice, bob, board, now } = await networkHelpers.loadFixture(deploy);
 
     await board.write.createBounty([REWARD, now + DAY, now + 2n * DAY, b32("00")], {
       account: creator.account,
     });
-    await board.write.assignWorker([0n, worker.account.address], {
+    await board.write.startWorking([0n], { account: alice.account });
+
+    await viem.assertions.revertWithCustomError(
+      board.write.approveWork([0n, bob.account.address, b32("44")], {
+        account: creator.account,
+      }),
+      board,
+      "NotWorking",
+    );
+  });
+
+  it("expires an abandoned bounty (no workers) for anyone", async function () {
+    const { creator, bob, usdc, board, now } = await networkHelpers.loadFixture(deploy);
+
+    await board.write.createBounty([REWARD, now + DAY, now + 2n * DAY, b32("00")], {
       account: creator.account,
     });
 
     const testClient = await viem.getTestClient();
-    await testClient.increaseTime({ seconds: Number(2n * DAY) + 1 });
+    await testClient.increaseTime({ seconds: Number(DAY) + 1 });
     await testClient.mine({ blocks: 1 });
 
-    await board.write.expireBounty([0n], { account: worker.account });
+    // a stranger can trigger the refund; funds still go to the creator
+    await board.write.expireBounty([0n], { account: bob.account });
 
-    assert.equal(await board.read.getBounty([0n]).then((b) => b.status), 5); // Expired
+    assert.equal(await board.read.getBounty([0n]).then((b) => b.status), Status.Expired);
     assert.equal(await usdc.read.balanceOf([creator.account.address]), 1_000_000_000n);
-    assert.equal(await usdc.read.balanceOf([board.address]), 0n);
   });
 
-  it("escrows the exact reward amount", async function () {
-    const { creator, usdc, board, now } = await networkHelpers.loadFixture(deploy);
+  it("rejects expiring while workers are active within the grace period", async function () {
+    const { creator, alice, board, now } = await networkHelpers.loadFixture(deploy);
 
     await board.write.createBounty([REWARD, now + DAY, now + 2n * DAY, b32("00")], {
       account: creator.account,
     });
+    await board.write.startWorking([0n], { account: alice.account });
 
-    assert.equal(await usdc.read.balanceOf([board.address]), REWARD);
+    const testClient = await viem.getTestClient();
+    await testClient.increaseTime({ seconds: Number(DAY) + 1 });
+    await testClient.mine({ blocks: 1 });
+
+    await viem.assertions.revertWithCustomError(
+      board.write.expireBounty([0n], { account: alice.account }),
+      board,
+      "ExpiryNotReached",
+    );
   });
 });
