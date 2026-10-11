@@ -1,4 +1,56 @@
-# Sample Hardhat 3 Project (`node:test` and `viem`)
+# BountyBoard — USDC micro-task bounty platform (Hardhat 3 + viem)
+
+A USDC-powered micro-task bounty platform for Arc. The smart contract holds the
+money, enforces the rules, and records the value-bearing lifecycle events. The
+database holds the content. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for
+the onchain/offchain split, and [db/schema.sql](db/schema.sql) for the schema.
+
+## Contract
+
+`contracts/BountyBoard.sol` escrows USDC rewards and enforces the bounty
+lifecycle: create/fund, assign worker, submit work, approve/pay, cancel/expire,
+and a safety valve that lets a worker reclaim pay if the creator never reviews.
+
+```
+createBounty ──► Open ──assignWorker──► Assigned ──submitWork──► Submitted
+                │ │                                              │      │
+   cancelBounty │ └──expireBounty──► Expired (refund)            │      └─approveWork─► Completed (pay)
+   (refund)     ▼                                                │
+            Cancelled (refund)                 claimUnreviewed ◄─┘  Reclaimed (pay)
+```
+
+- Creator: `createBounty`, `assignWorker`, `approveWork`, `cancelBounty`.
+- Worker: `submitWork`, `claimUnreviewed`.
+- Anyone: `expireBounty` (refund always goes to the creator).
+
+Run the tests:
+
+```shell
+npx hardhat test            # Solidity unit tests + TypeScript integration tests
+npx hardhat test solidity   # contracts/*.t.sol only
+npx hardhat test nodejs     # test/*.ts only
+```
+
+## Deploy
+
+```shell
+# local simulated chain (deploys a 6-decimal MockUSDC too)
+npx hardhat ignition deploy ignition/modules/BountyBoardLocal.ts
+
+# Arc testnet (copy .env.example -> .env and fill ARC_TESTNET_RPC_URL/ARC_PRIVATE_KEY)
+npx hardhat ignition deploy ignition/modules/BountyBoard.ts --network arcTestnet
+```
+
+Rewards use Arc's USDC ERC-20 interface at `0x3600000000000000000000000000000000000000`
+(6 decimals). Arc is USDC-native: USDC is also the gas token (18-decimal native
+view). Never mix the two views; always read `decimals()`.
+
+---
+
+## Hardhat 3 sample scaffold
+
+This project started from the Hardhat 3 `node:test` + `viem` sample. The
+original notes follow.
 
 This project showcases a Hardhat 3 project using the native Node.js test runner (`node:test`) and the `viem` library for Ethereum interactions.
 
