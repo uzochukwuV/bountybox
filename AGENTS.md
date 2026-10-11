@@ -39,3 +39,22 @@ When writing or modifying tests, configuring `hardhat.config.ts`, or interacting
 
 - Hardhat 3 — https://hardhat.org/llms.txt
 - viem — https://viem.sh/llms.txt
+
+## Frontend
+
+`frontend/` is a Vite + React app (TanStack Query, react-router) served on port
+12000. It uses Supabase for auth and content and reads no secrets at build time
+other than the public anon key. `frontend/src/api/db.js` adapts the Supabase JS
+client to the entity call shapes the pages use (`db.entities.*.filter/create/
+update`, `db.auth.*`, `db.integrations.Core.UploadPrivateFile`); pages import it
+as `@/api/db`. `frontend/src/lib/bountyChain.js` is the only module that talks
+to the escrow contract — it is currently a mock and is the seam to replace with
+real `viem` calls.
+
+Supabase schema and RLS policies live in `db/supabase_schema.sql` (idempotent;
+also creates the private `box` storage bucket). Apply it with
+`psql "$SUPABASE_DB_URL" -f db/supabase_schema.sql`. Money-bearing bounty fields
+are guarded by a trigger so only the creator can change escrow/payout/winner
+columns; the contract remains the source of truth for funds. The direct DB host
+does not resolve from here — connect through the Supabase pooler
+(`aws-0-eu-west-1.pooler.supabase.com:6543`, user `postgres.<ref>`).

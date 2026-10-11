@@ -1,0 +1,125 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 224 24% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 24% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 24% 10%;
+    --primary: 259 55% 46%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 16% 96%;
+    --secondary-foreground: 224 24% 14%;
+    --muted: 220 16% 96.5%;
+    --muted-foreground: 220 9% 46%;
+    --accent: 259 60% 96%;
+    --accent-foreground: 259 55% 38%;
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 14% 91%;
+    --input: 220 14% 91%;
+    --ring: 259 55% 46%;
+    --radius: 0.75rem;
+    --font-heading: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-display: 'Space Grotesk', 'Inter', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --tone-blue: 221 83% 42%;
+    --tone-blue-soft: 221 92% 96%;
+    --tone-amber: 32 92% 38%;
+    --tone-amber-soft: 42 96% 94%;
+    --tone-violet: 262 62% 50%;
+    --tone-violet-soft: 262 80% 96%;
+    --tone-green: 142 68% 30%;
+    --tone-green-soft: 142 62% 95%;
+    --tone-red: 0 72% 45%;
+    --tone-red-soft: 0 86% 97%;
+    --tone-slate: 220 9% 42%;
+    --tone-slate-soft: 220 16% 95%;
+    --chart-1: 262 62% 52%;
+    --chart-2: 221 83% 53%;
+    --chart-3: 142 64% 38%;
+    --chart-4: 38 92% 50%;
+    --chart-5: 0 72% 51%;
+    --sidebar-background: 220 24% 98%;
+    --sidebar-foreground: 224 16% 24%;
+    --sidebar-primary: 259 55% 46%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 259 60% 95%;
+    --sidebar-accent-foreground: 259 55% 38%;
+    --sidebar-border: 220 14% 91%;
+    --sidebar-ring: 259 55% 46%;
+  }
+
+  .dark {
+    --background: 224 26% 7%;
+    --foreground: 0 0% 98%;
+    --card: 224 22% 10%;
+    --card-foreground: 0 0% 98%;
+    --popover: 224 22% 10%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 262 70% 66%;
+    --primary-foreground: 224 26% 8%;
+    --secondary: 224 16% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 224 16% 15%;
+    --muted-foreground: 220 12% 65%;
+    --accent: 259 30% 22%;
+    --accent-foreground: 262 80% 88%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 224 14% 18%;
+    --input: 224 14% 18%;
+    --ring: 262 70% 66%;
+    --tone-blue: 221 90% 72%;
+    --tone-blue-soft: 221 40% 18%;
+    --tone-amber: 42 92% 66%;
+    --tone-amber-soft: 38 40% 17%;
+    --tone-violet: 262 80% 76%;
+    --tone-violet-soft: 262 34% 21%;
+    --tone-green: 142 60% 60%;
+    --tone-green-soft: 142 30% 16%;
+    --tone-red: 0 80% 70%;
+    --tone-red-soft: 0 34% 19%;
+    --tone-slate: 220 12% 68%;
+    --tone-slate-soft: 220 14% 18%;
+    --chart-1: 262 70% 66%;
+    --chart-2: 221 83% 63%;
+    --chart-3: 142 60% 50%;
+    --chart-4: 38 92% 60%;
+    --chart-5: 0 72% 61%;
+    --sidebar-background: 224 24% 9%;
+    --sidebar-foreground: 0 0% 96%;
+    --sidebar-primary: 262 70% 66%;
+    --sidebar-primary-foreground: 224 26% 8%;
+    --sidebar-accent: 259 26% 20%;
+    --sidebar-accent-foreground: 262 80% 88%;
+    --sidebar-border: 224 14% 18%;
+    --sidebar-ring: 262 70% 66%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-background text-foreground font-body;
+  }
+
+  ::selection {
+    @apply bg-primary/15;
+  }
+}
