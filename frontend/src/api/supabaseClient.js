@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
+import { env } from '@/lib/env';
 
-const url = import.meta.env.VITE_SUPABASE_URL;
-const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const url = env.SUPABASE_URL;
+const anonKey = env.SUPABASE_ANON_KEY;
 
 if (!url || !anonKey) {
   throw new Error(
@@ -17,4 +18,4 @@ export const supabase = createClient(url, anonKey, {
   },
 });
 
-export const STORAGE_BUCKET = import.meta.env.VITE_SUPABASE_BUCKET || 'box';
+export const STORAGE_BUCKET = env.SUPABASE_BUCKET;

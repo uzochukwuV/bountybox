@@ -7,6 +7,7 @@
 // in the ERC-20 token; never mix the two views.
 
 import { createPublicClient, formatUnits, http, parseUnits } from 'viem';
+import { env } from '@/lib/env';
 
 export const ARC_CHAIN = {
   id: 5042002,
@@ -26,7 +27,7 @@ export const USDC_DECIMALS = 6;
 export const FAUCET_URL = 'https://faucet.circle.com';
 
 /** Escrow contract address, set after `ignition deploy` (Phase 3). */
-export const ESCROW_ADDRESS = import.meta.env.VITE_BOUNTYBOARD_ADDRESS || '';
+export const ESCROW_ADDRESS = env.BOUNTYBOARD_ADDRESS;
 
 export const USDC_ABI = [
   {

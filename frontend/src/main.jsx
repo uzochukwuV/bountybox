@@ -3,11 +3,12 @@ import ReactDOM from 'react-dom/client'
 import { PrivyProvider } from '@privy-io/react-auth'
 import App from '@/App.jsx'
 import { ARC_CHAIN } from '@/lib/arc'
+import { env } from '@/lib/env'
 import '@/index.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <PrivyProvider
-    appId={import.meta.env.VITE_PRIVY_APP_ID}
+    appId={env.PRIVY_APP_ID}
     config={{
       loginMethods: ['email', 'google', 'wallet'],
       embeddedWallets: { ethereum: { createOnLogin: 'users-without-wallets' } },

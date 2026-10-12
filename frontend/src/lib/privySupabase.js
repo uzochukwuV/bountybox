@@ -13,8 +13,10 @@
 // If neither is configured the caller falls back to an anonymous Supabase
 // session (see AuthContext), which must be enabled in Supabase Auth settings.
 
-const SESSION_URL = import.meta.env.VITE_PRIVY_SESSION_URL || '';
-const JWT_SECRET = import.meta.env.VITE_SUPABASE_JWT_SECRET || '';
+import { env } from '@/lib/env';
+
+const SESSION_URL = env.PRIVY_SESSION_URL;
+const JWT_SECRET = env.SUPABASE_JWT_SECRET || '';
 
 export const hasServerBridge = !!SESSION_URL;
 export const hasLocalMint = !SESSION_URL && !!JWT_SECRET;

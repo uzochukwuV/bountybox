@@ -44,7 +44,10 @@ When writing or modifying tests, configuring `hardhat.config.ts`, or interacting
 
 `frontend/` is a Vite + React app (TanStack Query, react-router) served on port
 12000. It uses Supabase for content and reads no secrets at build time other than
-the public anon key. `frontend/src/api/db.js` adapts the Supabase JS
+the public anon key. It ships as a container (`frontend/Dockerfile`, nginx):
+`docker-entrypoint.sh` turns the deploy's `VITE_*` env vars into `/env.js`, which
+`index.html` loads and `src/lib/env.js` reads as `window.__ENV__` — the image
+itself is built without configuration. `frontend/src/api/db.js` adapts the Supabase JS
 client to the entity call shapes the pages use (`db.entities.*.filter/create/
 update`, `db.auth.*`, `db.integrations.Core.UploadPrivateFile`); pages import it
 as `@/api/db`. `frontend/src/lib/bountyChain.js` is the only module that talks

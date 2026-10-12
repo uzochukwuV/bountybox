@@ -28,6 +28,26 @@ Apply it once with `psql "$SUPABASE_DB_URL" -f db/supabase_schema.sql`, or paste
 it into the Supabase SQL editor. It is idempotent and creates the tables, the
 private `box` storage bucket, and the row-level security policies.
 
+## Container
+
+The image builds without configuration and is served by nginx:
+
+```bash
+docker build -t bountybox-frontend .
+docker run -p 8080:80 \
+  -e VITE_SUPABASE_URL=... \
+  -e VITE_SUPABASE_ANON_KEY=... \
+  -e VITE_PRIVY_APP_ID=... \
+  bountybox-frontend
+```
+
+Vite inlines `import.meta.env` at build time, so the same `VITE_*` names are read
+at run time instead: `docker-entrypoint.sh` writes them to `/env.js`, which
+`index.html` loads and `src/lib/env.js` exposes as `window.__ENV__`. Build-time
+values, when present, win. Do not pass `VITE_SUPABASE_JWT_SECRET` to the
+container — it is the dev-only in-browser mint.
+
+
 ## Scripts
 
 - `npm run dev` — dev server
