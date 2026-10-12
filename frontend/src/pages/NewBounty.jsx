@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useIdentity } from '@/lib/useIdentity';
-import { addTestUSDC, formatUSDC, loadBalance, saveBalance } from '@/lib/arc';
+import { FAUCET_URL, formatUSDC } from '@/lib/arc';
 import { fundEscrowAndPublish } from '@/lib/bountyChain';
 import { useToast } from '@/components/ui/use-toast';
 
@@ -91,7 +91,7 @@ export default function NewBounty() {
   };
   const stepOneValid = !errors.title && !errors.description && !errors.reward;
 
-  const balance = loadBalance();
+  const balance = identity.balance;
   const shortfall = Math.max(0, reward - balance);
   const canFund = identity.connected && reward > 0 && shortfall === 0;
 
@@ -122,8 +122,6 @@ export default function NewBounty() {
         },
         identity,
       });
-
-      saveBalance(balance - reward);
 
       toast({
         title: 'Bounty is live on Arc',
@@ -381,14 +379,14 @@ export default function NewBounty() {
                         <p className="text-[11px] text-tone-red">
                           You need {formatUSDC(shortfall)} more USDC to fund this bounty.
                         </p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => addTestUSDC(1000)}
-                          className="rounded-full"
+                        <a
+                          href={FAUCET_URL}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex h-8 items-center rounded-full border border-border px-3 text-xs font-medium transition hover:border-primary/40 hover:text-primary"
                         >
-                          Add 1,000 test USDC
-                        </Button>
+                          Get test USDC from the faucet
+                        </a>
                       </div>
                     )}
                   </div>

@@ -4,7 +4,7 @@ import { Copy, ShieldCheck } from 'lucide-react';
 import SectionCard from '@/components/SectionCard';
 import EscrowPill from '@/components/EscrowPill';
 import TxLink from '@/components/TxLink';
-import { ARC_CHAIN, formatUSDC, shortAddress } from '@/lib/arc';
+import { ARC_CHAIN, ESCROW_ADDRESS, formatUSDC, shortAddress } from '@/lib/arc';
 import { useToast } from '@/components/ui/use-toast';
 
 function Row({ label, children }) {
@@ -26,7 +26,7 @@ export default function EscrowPanel({ bounty }) {
   const remaining = Math.max(0, (bounty.reward_usdc || 0) - paidOut);
 
   const copyAddress = async () => {
-    await navigator.clipboard.writeText(bounty.contract_address || ARC_CHAIN.escrow);
+    await navigator.clipboard.writeText(bounty.contract_address || ESCROW_ADDRESS);
     toast({ title: 'Contract address copied' });
   };
 
@@ -62,7 +62,7 @@ export default function EscrowPanel({ bounty }) {
           className="inline-flex items-center gap-1.5 font-mono text-xs text-primary hover:underline"
           title="Copy contract address"
         >
-          {shortAddress(bounty.contract_address || ARC_CHAIN.escrow)}
+          {shortAddress(bounty.contract_address || ESCROW_ADDRESS)}
           <Copy className="h-3 w-3" />
         </button>
       </Row>

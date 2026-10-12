@@ -1,7 +1,8 @@
 import React from 'react';
 import { Link, NavLink } from 'react-router-dom';
 import { BarChart3, LayoutGrid, Plus, X } from 'lucide-react';
-import { ARC_CHAIN, disconnectWallet, formatUSDC, shortAddress } from '@/lib/arc';
+import { usePrivy } from '@privy-io/react-auth';
+import { ARC_CHAIN, formatUSDC, shortAddress } from '@/lib/arc';
 import { useIdentity } from '@/lib/useIdentity';
 import InitialsAvatar from '@/components/InitialsAvatar';
 import ConnectWalletButton from '@/components/ConnectWalletButton';
@@ -35,6 +36,7 @@ function NavItem({ to, label, icon: Icon, end, onNavigate }) {
 
 export default function Sidebar({ open, onClose }) {
   const identity = useIdentity();
+  const { logout } = usePrivy();
 
   return (
     <>
@@ -115,10 +117,10 @@ export default function Sidebar({ open, onClose }) {
               </p>
               <button
                 type="button"
-                onClick={() => disconnectWallet()}
+                onClick={() => logout()}
                 className="mt-2.5 text-[11px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
               >
-                Disconnect
+                Sign out
               </button>
             </>
           ) : (

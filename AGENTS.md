@@ -43,18 +43,39 @@ When writing or modifying tests, configuring `hardhat.config.ts`, or interacting
 ## Frontend
 
 `frontend/` is a Vite + React app (TanStack Query, react-router) served on port
-12000. It uses Supabase for auth and content and reads no secrets at build time
-other than the public anon key. `frontend/src/api/db.js` adapts the Supabase JS
+12000. It uses Supabase for content and reads no secrets at build time other than
+the public anon key. `frontend/src/api/db.js` adapts the Supabase JS
 client to the entity call shapes the pages use (`db.entities.*.filter/create/
 update`, `db.auth.*`, `db.integrations.Core.UploadPrivateFile`); pages import it
 as `@/api/db`. `frontend/src/lib/bountyChain.js` is the only module that talks
 to the escrow contract — it is currently a mock and is the seam to replace with
 real `viem` calls.
 
+Identity is Privy, not Supabase Auth. `<PrivyProvider>` lives in
+`frontend/src/main.jsx` (App ID in `VITE_PRIVY_APP_ID`); `AuthContext.jsx` reads
+the Privy user and obtains a Supabase session through `lib/privySupabase.js`,
+which either POSTs the Privy token to `VITE_PRIVY_SESSION_URL` (Edge Function) or
+mints a local HS256 JWT from `VITE_SUPABASE_JWT_SECRET` (dev only). With neither
+set, and anonymous sign-ins disabled, it runs in degraded mode (Privy identity,
+no DB session) and exposes `sessionError`. The deterministic Supabase user id is
+uuidv5(Privy DID) — mirrored as `profiles.privy_did` — so the same person maps to
+the same `auth.uid()` on every device. `useWallet.js` wraps Privy's embedded
+wallet in a viem wallet client on Arc; `lib/arc.js` holds the chain object
+(id 5042002), the ERC-20 USDC predeploy (`0x3600…0000`, 6 dp) and the explorer.
+
 Supabase schema and RLS policies live in `db/supabase_schema.sql` (idempotent;
 also creates the private `box` storage bucket). Apply it with
-`psql "$SUPABASE_DB_URL" -f db/supabase_schema.sql`. Money-bearing bounty fields
-are guarded by a trigger so only the creator can change escrow/payout/winner
-columns; the contract remains the source of truth for funds. The direct DB host
-does not resolve from here — connect through the Supabase pooler
-(`aws-0-eu-west-1.pooler.supabase.com:6543`, user `postgres.<ref>`).
+`psql "$SUPABASE_DB_URL" -f db/supabase_schema.sql`, then
+`db/migrations/001_privy_identity.sql` (adds `privy_did`/`wallet_address` and
+drops the `auth.users` FKs so bridged identities can own rows). The server half
+of the bridge is `supabase/functions/privy-session/`, deployed with
+`supabase functions deploy privy-session --project-ref <ref> --no-verify-jwt`;
+it verifies the Privy token (ES256, via JWKS) and returns a Supabase session
+whose `sub` is uuidv5(did). It needs secrets `PRIVY_APP_ID` and
+`BRIDGE_JWT_SECRET` (the project JWT secret — `SUPABASE_JWT_SECRET` is rejected
+by the CLI, which reserves the `SUPABASE_` prefix). Deploying needs
+`SUPABASE_ACCESS_TOKEN`. Money-bearing bounty fields are guarded by a trigger so
+only the creator can change escrow/payout/winner columns; the contract remains
+the source of truth for funds. The direct DB host does not resolve from here —
+connect through the Supabase pooler
+(`aws-0-eu-west-1.pooler.supabase.com:5432`, user `postgres.<ref>`).

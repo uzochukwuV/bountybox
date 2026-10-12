@@ -1,0 +1,9 @@
+# Serve the Privy -> Supabase session bridge locally:
+#   supabase functions serve privy-session --env-file supabase/.env.local
+# Keep the function JWT verification OFF (it authenticates via the Privy token in
+# the body, not a Supabase JWT): deploy with --no-verify-jwt.
+
+project_id = "tlfeewciagjjilpppmvw"
+
+[functions.privy-session]
+verify_jwt = false

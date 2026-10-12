@@ -13,10 +13,12 @@ import EmptyState from '@/components/EmptyState';
 import ConnectWalletButton from '@/components/ConnectWalletButton';
 import { Button } from '@/components/ui/button';
 import { useIdentity } from '@/lib/useIdentity';
-import { ARC_CHAIN, addTestUSDC, disconnectWallet, formatUSDC, shortAddress } from '@/lib/arc';
+import { ARC_CHAIN, FAUCET_URL, formatUSDC, shortAddress } from '@/lib/arc';
+import { usePrivy } from '@privy-io/react-auth';
 
 export default function Dashboard() {
   const identity = useIdentity();
+  const { logout } = usePrivy();
   const [posted, setPosted] = useState([]);
   const [submissions, setSubmissions] = useState([]);
   const [stats, setStats] = useState({ posted: 0, active: 0, locked: 0, earned: 0 });
@@ -116,16 +118,21 @@ export default function Dashboard() {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => addTestUSDC(1000)} className="rounded-full">
-                  Add 1,000 test USDC
-                </Button>
+                <a
+                  href={FAUCET_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-9 items-center rounded-full border border-border px-3 text-xs font-medium transition hover:border-primary/40 hover:text-primary"
+                >
+                  Get test USDC
+                </a>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => disconnectWallet()}
+                  onClick={() => logout()}
                   className="rounded-full text-muted-foreground"
                 >
-                  Disconnect
+                  Sign out
                 </Button>
               </div>
             </div>

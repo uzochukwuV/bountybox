@@ -1,19 +1,20 @@
 import { useAuth } from '@/lib/AuthContext';
 import { useWallet } from '@/lib/useWallet';
 
-// The signed-in account plus the mock connected wallet.
+// The signed-in Privy identity plus its embedded wallet on Arc.
 export function useIdentity() {
   const { user } = useAuth();
-  const { wallet, balance, connected } = useWallet();
+  const { address, connected, balance } = useWallet();
 
   const email = user?.email || '';
   const name = user?.full_name || (email ? email.split('@')[0] : 'Guest');
 
   return {
     id: user?.id || null,
+    did: user?.did || null,
     name,
     email,
-    walletAddress: wallet?.address || '',
+    walletAddress: address || user?.wallet_address || '',
     connected,
     balance,
   };

@@ -8,7 +8,7 @@ export default function TxLink({ hash, label, className }) {
 
   return (
     <a
-      href={`${ARC_CHAIN.explorer}/tx/${hash}`}
+      href={`${ARC_CHAIN.blockExplorers.default.url}/tx/${hash}`}
       target="_blank"
       rel="noreferrer"
       className={cn(

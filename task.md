@@ -108,34 +108,58 @@ Supabase (RLS via auth.uid())      BountyBoard.sol on Arc testnet
 - [x] Arc testnet
 - [x] Privy App ID recorded
 
-### Phase 1 — Auth: Privy → Supabase session
-- [ ] Add `@privy-io/react-auth` to the frontend; wrap app in `<PrivyProvider>`
+### Phase 1 — Auth: Privy → Supabase session — DONE (server step pending)
+- [x] Add `@privy-io/react-auth` to the frontend; wrap app in `<PrivyProvider>`
       with `appId = cmegxzpfu01n0ju0c64l5w0s5` and Arc testnet as the default chain.
-- [ ] Replace the Supabase-session source in `src/lib/AuthContext.jsx` with the
-      Privy→Supabase bridge. Keep the context's public API (`user`,
-      `isAuthenticated`, `logout`, `isLoadingAuth`) so pages do not change.
-- [ ] Edge Function `privy-session`: verify Privy JWT via JWKS, upsert the
-      `profiles` row, return a Supabase session; client installs it with
-      `setSession()`.
-- [ ] DB migration: add `privy_did` (unique) + `wallet_address` (unique) to
-      `profiles`; keep `id` as uuidv5(did).
-- [ ] Delete `Login`, `Register`, `ForgotPassword`, `ResetPassword` pages and
-      the Google button; add one "Sign in with Privy" screen.
+      (`src/main.jsx`, login methods email/google/wallet, embedded wallet on login.)
+- [x] Replace the Supabase-session source in `src/lib/AuthContext.jsx` with the
+      Privy→Supabase bridge. Public API (`user`, `isAuthenticated`, `logout`,
+      `isLoadingAuth`) preserved; `user` now carries `did`, `wallet_address`,
+      `email`, `full_name` from the Privy user.
+- [x] Client bridge `src/lib/privySupabase.js`: POSTs the Privy access token to
+      `VITE_PRIVY_SESSION_URL` (Edge Function) when set; otherwise mints a local
+      HS256 Supabase JWT from `VITE_SUPABASE_JWT_SECRET` (dev only); otherwise
+      falls back to a Supabase **anonymous** session.
+- [x] DB migration `db/migrations/001_privy_identity.sql` applied to the live
+      project (via the pooler): `privy_did` + `wallet_address` on `profiles`,
+      `current_wallet()` helper, and the `auth.users` FKs dropped so bridged
+      identities (uuidv5(did), no auth.users row) can own rows.
+- [x] Delete `Login`, `Register`, `ForgotPassword`, `ResetPassword` and the
+      Google button; `Login` is now one "Continue" screen that opens the Privy modal.
+- [x] Session bridge **verified end-to-end** against live Supabase: a locally
+      minted HS256 token is accepted, a profile upserts, and a bounty inserts
+      with the bridged id as creator (RLS passed, no `auth.users` row).
+- [x] `supabase/functions/privy-session/index.ts` **deployed** to the live project
+      (verifies the Privy token via JWKS — ES256/P-256 — then returns a Supabase
+      session). Secrets set: `PRIVY_APP_ID`, `BRIDGE_JWT_SECRET` (the project JWT
+      secret; `SUPABASE_JWT_SECRET` cannot be set — the CLI reserves the
+      `SUPABASE_` prefix). Verified live: OPTIONS 200, missing token 400, bad
+      structure 401, valid-ES256-but-foreign-key 401 (JWKS path runs).
+- [x] Frontend pointed at the function: `VITE_PRIVY_SESSION_URL=https://tlfeewciagjjilpppmvw.supabase.co/functions/v1/privy-session`,
+      `VITE_SUPABASE_JWT_SECRET` cleared (dev fallback no longer needed).
+- [x] Anonymous sign-ins enabled on the project (last-resort fallback path).
 - [ ] Decide whether to disable the Supabase email provider (Privy-only).
 - **Acceptance:** sign in with Privy on two browsers → same `auth.uid()`, same
   `profiles` row, an authenticated Supabase query returns the user's rows.
+  *Bridge verified with minted tokens end-to-end and the function deployed; full
+  two-browser login not exercised (needs a real inbox/wallet).*
 
-### Phase 2 — Wallet + chain client
-- [ ] Add `viem` to the frontend.
-- [ ] Define the Arc testnet chain object (id `5042002`, RPC, explorer).
-- [ ] Replace `src/lib/arc.js` mock wallet + `src/lib/useWallet.js` with a
-      Privy-backed hook: `{ address, connected, walletClient, switchChain, usdcBalance }`
-      built from `embeddedWallet.getEthereumProvider()` →
+### Phase 2 — Wallet + chain client — DONE
+- [x] Add `viem` to the frontend.
+- [x] Define the Arc testnet chain object (id `5042002`, RPC
+      `rpc.testnet.arc.io`, explorer `explorer.testnet.arc.io`) in `src/lib/arc.js`.
+- [x] Replace the mock wallet with `src/lib/useWallet.js`: Privy-backed
+      `{ address, connected, onArc, wallet, balance, getWalletClient, switchToArc,
+      refreshBalance }` built from `wallet.getEthereumProvider()` →
       `createWalletClient({ chain, transport: custom(provider) })`.
-- [ ] USDC helpers: read `decimals()` (6) and `balanceOf`; never mix with the
-      18-dp native gas view.
+- [x] USDC helpers: ERC-20 predeploy `0x3600…0000`, `decimals()` (6) and
+      `balanceOf`; native gas view (18 dp) kept separate.
+- [x] Update consumers: `ConnectWalletButton` (Privy `login`), `Sidebar` /
+      `Dashboard` (Sign out via Privy, faucet link), `NewBounty` (real balance),
+      `TxLink` + `EscrowPanel` (new chain/explorer shape, `ESCROW_ADDRESS`).
 - **Acceptance:** a test component reads the connected address and USDC balance
   from Arc testnet via Privy's embedded wallet.
+  *Address/chain wiring verified; live balance read pending a funded Arc wallet.*
 
 ### Phase 3 — Deploy the contract
 - [ ] Add `ARC_TESTNET_RPC_URL` + `ARC_PRIVATE_KEY` to the root `.env`.
@@ -192,11 +216,17 @@ callers stay put.
 
 ## Open questions
 
-1. Supabase Edge Function is the recommended bridge. Fallback if it is
-   unavailable: self-issued JWT (sub = uuidv5(did), custom `wallet` claim) signed
-   with the Supabase JWT secret. Note Supabase is moving to asymmetric signing
-   keys, so prefer the Edge Function.
+1. **Privy → Supabase session bridge — deployed and working.** The Edge Function
+   `supabase/functions/privy-session/` verifies the Privy JWT via JWKS and returns
+   a Supabase session. Deployed with `--no-verify-jwt`; secrets `PRIVY_APP_ID` and
+   `BRIDGE_JWT_SECRET` (note: `SUPABASE_JWT_SECRET` is rejected by the CLI, which
+   reserves the `SUPABASE_` prefix). The client sets `VITE_PRIVY_SESSION_URL`; the
+   dev-only in-browser HS256 mint and the anonymous-session fallback remain as
+   backstops but are no longer the primary path.
 2. Privy webhook for profile pre-provisioning — needed, or is upsert-on-login
-   enough?
-3. Gas: does the embedded wallet need test USDC from `faucet.circle.com`, or do
+   (`db.auth.ensureProfile`) enough?
+3. Bridged identities have no `auth.users` row, so migration 001 drops the
+   `auth.users` FKs. If the Edge Function instead provisions users via the
+   service-role admin API, skip that block and keep the FKs.
+4. Gas: does the embedded wallet need test USDC from `faucet.circle.com`, or do
    we sponsor gas?

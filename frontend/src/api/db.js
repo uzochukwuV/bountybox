@@ -161,8 +161,10 @@ async function profileFor(user) {
     .maybeSingle();
   return {
     id: user.id,
-    email: user.email,
+    email: data?.email || user.email,
     full_name: data?.full_name || user.user_metadata?.full_name || user.email?.split('@')[0],
+    privy_did: data?.privy_did || null,
+    wallet_address: data?.wallet_address || null,
     role: data?.role || 'user',
     created_date: data?.created_date || user.created_at,
   };
@@ -184,71 +186,41 @@ const auth = {
     return !!data?.session;
   },
 
-  async loginViaEmailPassword(email, password) {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  // Mirror the Privy identity onto the current profile row. Upsert (not update)
+  // so bridged identities, which have no auth.users-triggered row, still get one.
+  async ensureProfile(identity) {
+    const { data: current } = await supabase.auth.getUser();
+    const id = current?.user?.id;
+    if (!id) return null;
+    const { data, error } = await supabase
+      .from('profiles')
+      .upsert(
+        {
+          id,
+          privy_did: identity.did || null,
+          wallet_address: (identity.wallet_address || '').toLowerCase() || null,
+          email: identity.email || null,
+          full_name: identity.full_name || null,
+        },
+        { onConflict: 'id' }
+      )
+      .select()
+      .single();
     if (error) throw new Error(error.message);
     return data;
   },
 
-  async register({ email, password }) {
-    const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) throw new Error(error.message);
-    return data;
-  },
-
-  async verifyOtp({ email, otpCode }) {
-    const { data, error } = await supabase.auth.verifyOtp({
-      email,
-      token: otpCode,
-      type: 'signup',
-    });
-    if (error) throw new Error(error.message);
-    return data;
-  },
-
-  async resendOtp(email) {
-    const { error } = await supabase.auth.resend({ type: 'signup', email });
-    if (error) throw new Error(error.message);
-    return true;
-  },
-
-  async setToken(accessToken) {
-    const { data, error } = await supabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: '',
-    });
-    if (error) throw new Error(error.message);
-    return data;
-  },
-
-  async resetPasswordRequest(email) {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
-    });
-    if (error) throw new Error(error.message);
-    return true;
-  },
-
-  async resetPassword({ newPassword }) {
-    const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+  // The session is established by the Privy -> Supabase bridge (see
+  // lib/privySupabase.js), not by email/password. These helpers remain for the
+  // bridge and for sign-out only.
+  async setSession(session) {
+    const { data, error } = await supabase.auth.setSession(session);
     if (error) throw new Error(error.message);
     return data;
   },
 
   async logout() {
     await supabase.auth.signOut();
-  },
-
-  redirectToLogin() {
-    window.location.href = '/login';
-  },
-
-  loginWithProvider(provider, returnTo = '/') {
-    const target = returnTo && returnTo.startsWith('/') ? returnTo : '/';
-    supabase.auth.signInWithOAuth({
-      provider,
-      options: { redirectTo: `${window.location.origin}${target}` },
-    });
   },
 };
 
