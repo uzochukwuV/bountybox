@@ -4,7 +4,7 @@ import { Loader2 } from 'lucide-react';
 export default function TxOverlay({
   open,
   label = 'Confirming on Arc…',
-  sublabel = 'Simulated transaction — no real funds move.',
+  sublabel = 'Waiting for the transaction receipt.',
 }) {
   if (!open) return null;
 

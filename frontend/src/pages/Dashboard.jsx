@@ -99,7 +99,7 @@ export default function Dashboard() {
 
       <SectionCard
         title="Wallet"
-        description={identity.connected ? 'Connected to the demo wallet session' : 'Not connected yet'}
+        description={identity.connected ? 'Connected on Arc' : 'Not connected yet'}
         bodyClassName="space-y-4 p-5"
       >
         {identity.connected ? (
@@ -140,8 +140,8 @@ export default function Dashboard() {
         ) : (
           <>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Connect a wallet to fund bounties, claim work, and receive payouts. The session is
-              simulated with a test balance.
+              Connect a wallet to fund bounties, claim work, and receive payouts. Rewards are real
+              USDC on Arc testnet.
             </p>
             <ConnectWalletButton />
           </>

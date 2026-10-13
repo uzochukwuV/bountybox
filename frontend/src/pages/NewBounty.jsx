@@ -22,6 +22,8 @@ import {
 import { useIdentity } from '@/lib/useIdentity';
 import { FAUCET_URL, formatUSDC } from '@/lib/arc';
 import { fundEscrowAndPublish } from '@/lib/bountyChain';
+import { describeRevert } from '@/lib/chain';
+import { validateDeadlines } from '@/lib/deadlines';
 import { useToast } from '@/components/ui/use-toast';
 
 const CATEGORIES = [
@@ -88,12 +90,18 @@ export default function NewBounty() {
         ? 'Describe the deliverable in at least 30 characters.'
         : '',
     reward: reward <= 0 ? 'Set a USDC reward above 0.' : '',
+    split:
+      reward > 0 && slots > 1 && Math.round(reward * 1e6) % slots !== 0
+        ? `The reward must split evenly across ${slots} winners.`
+        : '',
+    deadlines: validateDeadlines(form),
   };
-  const stepOneValid = !errors.title && !errors.description && !errors.reward;
+  const stepOneValid = !errors.title && !errors.description && !errors.reward && !errors.split && !errors.deadlines;
 
   const balance = identity.balance;
   const shortfall = Math.max(0, reward - balance);
-  const canFund = identity.connected && reward > 0 && shortfall === 0;
+  const canFund =
+    identity.connected && reward > 0 && shortfall === 0 && !errors.split && !errors.deadlines;
 
   const publish = async () => {
     setPublishing(true);
@@ -128,6 +136,8 @@ export default function NewBounty() {
         description: `${formatUSDC(reward)} USDC locked in escrow.`,
       });
       navigate(`/bounty/${bounty.id}`);
+    } catch (error) {
+      toast({ title: 'Could not publish', description: describeRevert(error), variant: 'destructive' });
     } finally {
       setPublishing(false);
     }
@@ -260,11 +270,12 @@ export default function NewBounty() {
                       placeholder="250"
                       data-testid="bounty-reward"
                     />
-                    {slots > 1 && reward > 0 && (
+                    {slots > 1 && reward > 0 && !errors.split && (
                       <p className="text-[11px] text-muted-foreground">
                         {formatUSDC(reward / slots)} USDC per winner
                       </p>
                     )}
+                    {errors.split && <p className="text-[11px] text-destructive">{errors.split}</p>}
                   </div>
                   <div className="space-y-1.5">
                     <Label>Winners</Label>
@@ -301,6 +312,9 @@ export default function NewBounty() {
                       value={form.submission_deadline}
                       onChange={(event) => set({ submission_deadline: event.target.value })}
                     />
+                    {errors.deadlines && (
+                      <p className="text-[11px] text-destructive">{errors.deadlines}</p>
+                    )}
                   </div>
                 </div>
 
@@ -354,7 +368,7 @@ export default function NewBounty() {
                         : `${slots} winners · ${formatUSDC(reward / slots)} USDC each`
                     }
                   />
-                  <SummaryRow label="Network fee" value="Sponsored by Arc (demo)" />
+                  <SummaryRow label="Network fee" value="Paid in USDC gas on Arc" />
                 </div>
 
                 {!identity.connected ? (
@@ -404,7 +418,7 @@ export default function NewBounty() {
                     : `Fund ${formatUSDC(reward)} USDC & publish`}
                 </Button>
                 <p className="text-center text-[11px] text-muted-foreground">
-                  Simulated on Arc Testnet — no real funds move.
+                  Funds move on Arc Testnet — the reward is real USDC on the testnet.
                 </p>
               </div>
             </SectionCard>

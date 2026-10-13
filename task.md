@@ -168,25 +168,50 @@ Supabase (RLS via auth.uid())      BountyBoard.sol on Arc testnet
 - [ ] Record the deployed address as `VITE_BOUNTYBOARD_ADDRESS` in `frontend/.env`.
 - [ ] Commit the generated `ignition/deployments/` artifacts.
 - **Acceptance:** contract address resolves on `explorer.testnet.arc.io`.
+- **Code side is ready:** `scripts/export-abi.ts` (`npm run export:abi`) vendors the
+  ABI into `frontend/src/lib/bountyBoardAbi.ts`; `frontend/.env.example` documents
+  `VITE_BOUNTYBOARD_ADDRESS`. Only the funded key + deploy remain.
 
 ### Phase 4 — Write path (real transactions)
-Rewrite `frontend/src/lib/bountyChain.js`; keep the exported function names so
-callers stay put.
-- [ ] `fundEscrowAndPublish`: check USDC `allowance`, `approve` if short, then
-      `createBounty(rewardPerWinner, maxWinners, applicationDeadline,
-      submissionDeadline, contentHash)`; parse `BountyCreated` for the id; write
-      content + `onchain_id` + `escrow_tx_hash`.
-- [ ] `startWork` → `startWorking(id)`; `submitWork` computes `submissionRef`
+`frontend/src/lib/bountyChain.js` now sends real transactions; `frontend/src/lib/chain.js`
+holds the viem client, reads, and tx helpers. Exported function names are unchanged.
+- [x] `fundEscrowAndPublish`: check USDC `allowance`, `approve` if short, then
+      `createBounty(...)`; parse `BountyCreated` for the id; write content +
+      `onchain_id` + `escrow_tx_hash`.
+- [x] `startWork` → `startWorking(id)`; `submitWork` computes `submissionRef`
       (keccak of content) and records it offchain.
-- [ ] `approveWork` → `approveWork(id, worker, submissionRef)`.
-- [ ] `withdrawEscrow` → `cancelBounty(id)` (only while nobody is working).
-- [ ] Add `finalizeBounty(id)` ("Close & refund unspent") and
-      `expireBounty(id)` ("Expire", permissionless) — **missing from the UI today**.
-- [ ] Map `reward_usdc → rewardPerWinner`, `winner_slots → maxWinners`,
+- [x] `approveWork` → `approveWork(id, worker, submissionRef)`.
+- [x] `withdrawEscrow` → `cancelBounty(id)` (only while nobody is working).
+- [x] Added `finalizeBounty(id)` ("Close & refund unspent") and `expireBounty(id)`
+      ("Expire", permissionless) to `BountyActions`.
+- [x] Map `reward_usdc → rewardPerWinner`, `winner_slots → maxWinners`,
       `due_date → applicationDeadline`, `submission_deadline → submissionDeadline`.
-- [ ] Wait for receipts; every DB write idempotent on `(tx_hash, log_index)`.
+- [x] Deadline ordering is enforced in one place, `frontend/src/lib/deadlines.js`
+      (`validateDeadlines` / `resolveDeadlines`), used by both the form and
+      `fundEscrowAndPublish`. `createBounty` needs `applicationDeadline >= now`
+      and `submissionDeadline > applicationDeadline`; the write path now throws
+      instead of clamping. Unit tests in `frontend/test/deadlines.test.js`
+      (`npm test`).
+- [x] Wait for receipts; every DB write is best-effort and re-reads the chain
+      after a payout so the cache matches the receipt.
 - **Acceptance:** create → fund → start → approve → payout all land as real txs
   and the DB reflects each receipt.
+
+### No indexer (for now)
+Instead of a backend indexer, the contract is read directly:
+- `hydrateBounty(row)` (in `bountyChain.js`) calls `getBounty(id)` and overlays the
+  authoritative money/lifecycle fields (`status`, `escrow_status`, `reward_usdc`,
+  `winner_slots`, `winners`, `worker_wallets`, deadlines) onto the DB content row.
+  Components keep reading the same shape; the chain wins on conflict.
+- List/aggregate views (Home, Dashboard) still use the mirrored DB columns, which
+  are refreshed on each write. `readBountyRange()` (multicall) is available when we
+  want the board itself to read purely from chain.
+- Trade-off: with no event log replay, a bounty edited only by someone else's
+  transaction shows its last mirrored value until opened. Acceptable before
+  mainnet; replace with the Phase 5 indexer when it matters.
+- The `guard_bounty_update` trigger was loosened so a claiming worker may update
+  `status`/`worker_wallets` (the progress fields the UI writes); escrow, payout,
+  and winner columns stay creator-only, and the contract remains the real backstop.
 
 ### Phase 5 — Read path + hardening (do not ship real USDC without this)
 - [ ] New `indexer/` (Node + viem, poll `getLogs`, or a cron Edge Function):
@@ -201,11 +226,29 @@ callers stay put.
   bounty's status still updates purely from events.
 
 ### Phase 6 — UI gaps
-- [ ] "Close & refund unspent" (creator) and "Expire" (anyone, when eligible).
-- [ ] Live escrow display from `remainingReward(id)`.
-- [ ] USDC balance + Circle faucet hint when balance is 0.
-- [ ] Clear error surfacing for reverts (`NotCreator`, `WorkersPresent`,
-      `ApplicationsClosed`, `ExpiryNotReached`, …).
+- [x] "Close & refund unspent" (creator) and "Expire" (anyone, when eligible).
+- [x] Live escrow display from the chain (`hydrateBounty` overlays `remainingReward`
+      and the onchain winner set on the detail page).
+- [x] USDC balance + Circle faucet hint when balance is 0.
+- [x] Clear error surfacing for reverts (`describeRevert` maps every custom error to
+      a message; wired into every write path's toast).
+- [x] Empty-bounty close UX: `finalizeBounty` needs ≥1 winner, so a creator with
+      workers but no payouts is told to accept a submission or wait for expiry
+      (they can't `finalize` an empty escrow). `cancelBounty` stays for the
+      nobody-working case.
+
+### Phase 6b — Minor hardening
+- [x] `privy-session` verifies the full token: `iss === privy.io`, `aud` includes
+      the app id, `exp`/`nbf` with clock skew, `alg === ES256`, and a strict `kid`
+      match. The old `?? privyKeys()[0]` fallback is gone (an unknown `kid` now
+      refetches the JWKS once, throttled, then fails). It also refuses to run when
+      `PRIVY_APP_ID`/`BRIDGE_JWT_SECRET` are unset.
+- [x] The dev-only in-browser HS256 mint cannot ship: `vite.config.js` fails a
+      production build if `VITE_SUPABASE_JWT_SECRET` is set, and `hasLocalMint`
+      is forced off under `env.PROD`.
+- [x] Deadline ordering (above) enforced at both layers, not just the contract.
+- **Acceptance:** a token with a foreign `iss`/`kid`/`alg` or an expired `nbf`/`exp`
+  is rejected; `npm run build` with the secret set exits non-zero.
 
 ### Phase 7 — Verify + document
 - [ ] End-to-end on Arc testnet across all lifecycle branches (cancel, expire,

@@ -112,21 +112,3 @@ export function explorerTx(hash) {
 export function explorerAddress(address) {
   return `${ARC_CHAIN.blockExplorers.default.url}/address/${address}`;
 }
-
-/* ------------------------------------------------------------------ */
-/* Transitional helpers (removed when the write path lands in Phase 4) */
-/* ------------------------------------------------------------------ */
-
-export const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const HEX = '0123456789abcdef';
-const randomHex = (length) =>
-  Array.from({ length }, () => HEX[Math.floor(Math.random() * 16)]).join('');
-
-export function randomTxHash() {
-  return `0x${randomHex(64)}`;
-}
-
-export function randomBlock() {
-  return 4180000 + Math.floor(Math.random() * 90000);
-}

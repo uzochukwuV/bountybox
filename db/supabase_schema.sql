@@ -155,6 +155,12 @@ create trigger bounties_touch_updated
 -- Column guard: RLS lets a claiming worker update the bounty row, but only the
 -- creator may touch escrow / payout / winner fields. The contract is the source
 -- of truth for money; the table must not drift from it.
+--
+-- status and worker_wallets are deliberately NOT guarded: they are progress
+-- fields a claiming worker writes when they start working (the UI mirrors the
+-- onchain WorkStarted). Winner/escrow columns stay creator-only. The real
+-- backstop is the contract, which rejects any payout the creator did not
+-- authorize; these columns are a display cache.
 -- ---------------------------------------------------------------------------
 create or replace function public.guard_bounty_update()
 returns trigger
@@ -167,16 +173,16 @@ begin
     return new;
   end if;
   if (new.creator_id, new.creator_wallet, new.creator_email, new.creator_name,
-      new.reward_usdc, new.winner_slots, new.winners, new.worker_wallets,
+      new.reward_usdc, new.winner_slots, new.winners,
       new.escrow_status, new.escrow_tx_hash, new.escrow_funded_at,
       new.payout_tx_hash, new.payout_at, new.refund_tx_hash,
-      new.status, new.contract_address, new.onchain_id)
+      new.contract_address, new.onchain_id)
      is distinct from
      (old.creator_id, old.creator_wallet, old.creator_email, old.creator_name,
-      old.reward_usdc, old.winner_slots, old.winners, old.worker_wallets,
+      old.reward_usdc, old.winner_slots, old.winners,
       old.escrow_status, old.escrow_tx_hash, old.escrow_funded_at,
       old.payout_tx_hash, old.payout_at, old.refund_tx_hash,
-      old.status, old.contract_address, old.onchain_id)
+      old.contract_address, old.onchain_id)
   then
     raise exception 'Only the bounty creator may change escrow, payout, or winner fields'
       using errcode = '42501';

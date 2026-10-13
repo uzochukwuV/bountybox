@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 
 import { submitWork } from '@/lib/bountyChain';
+import { describeRevert } from '@/lib/chain';
 import { useToast } from '@/components/ui/use-toast';
 
 export default function SubmitWorkDialog({ bounty, identity, open, onOpenChange, onDone }) {
@@ -37,10 +38,12 @@ export default function SubmitWorkDialog({ bounty, identity, open, onOpenChange,
       setFiles([]);
       onOpenChange(false);
       toast({
-        title: 'Submission recorded onchain',
+        title: 'Submission recorded',
         description: 'The creator has been notified to review your work.',
       });
       onDone();
+    } catch (error) {
+      toast({ title: 'Could not submit', description: describeRevert(error), variant: 'destructive' });
     } finally {
       setSubmitting(false);
     }
@@ -52,7 +55,8 @@ export default function SubmitWorkDialog({ bounty, identity, open, onOpenChange,
         <DialogHeader>
           <DialogTitle className="font-heading">Submit your work</DialogTitle>
           <DialogDescription>
-            Your submission hash is recorded onchain. Attachments stay offchain, private to the creator.
+            Your submission is stored offchain; its reference hash is anchored onchain when the
+            creator accepts it.
           </DialogDescription>
         </DialogHeader>
 
@@ -96,7 +100,7 @@ export default function SubmitWorkDialog({ bounty, identity, open, onOpenChange,
             className="gap-2"
           >
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            {submitting ? 'Recording onchain…' : 'Submit work'}
+            {submitting ? 'Recording…' : 'Submit work'}
           </Button>
         </DialogFooter>
       </DialogContent>
