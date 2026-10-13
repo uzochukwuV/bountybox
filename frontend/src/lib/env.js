@@ -24,4 +24,6 @@ export const env = {
   BOUNTYBOARD_ADDRESS: read('VITE_BOUNTYBOARD_ADDRESS'),
   // Dev-only in-browser mint; never injected at runtime (must not ship in prod).
   SUPABASE_JWT_SECRET: import.meta.env.VITE_SUPABASE_JWT_SECRET || '',
+  // Vite sets this statically; privySupabase.js uses it to disable the dev mint.
+  PROD: import.meta.env.PROD,
 };

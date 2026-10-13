@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { createWalletClient, custom } from 'viem';
 import { ARC_CHAIN, USDC_DECIMALS, formatUSDCUnits, getUSDCBalance } from '@/lib/arc';
+import { registerWalletProvider } from '@/lib/chain';
 
 // Privy's embedded wallet is reported as walletClientType 'privy'; a connected
 // MetaMask etc. shows up as its own type. Prefer the embedded wallet.
@@ -24,6 +25,13 @@ export function useWallet() {
   const address = wallet?.address || '';
   const connected = !!address;
   const onArc = Number(wallet?.chainId) === ARC_CHAIN.id;
+
+  // Expose the active EIP-1193 provider to lib/chain.js, which lives outside the
+  // React tree. Privy's embedded wallet is not injected as window.ethereum.
+  useEffect(() => {
+    registerWalletProvider(wallet ? () => wallet.getEthereumProvider() : null);
+    return () => registerWalletProvider(null);
+  }, [wallet]);
 
   const refreshBalance = useCallback(async () => {
     if (!address) {

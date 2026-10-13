@@ -50,15 +50,28 @@ the public anon key. It ships as a container (`frontend/Dockerfile`, nginx):
 itself is built without configuration. `frontend/src/api/db.js` adapts the Supabase JS
 client to the entity call shapes the pages use (`db.entities.*.filter/create/
 update`, `db.auth.*`, `db.integrations.Core.UploadPrivateFile`); pages import it
-as `@/api/db`. `frontend/src/lib/bountyChain.js` is the only module that talks
-to the escrow contract — it is currently a mock and is the seam to replace with
-real `viem` calls.
+as `@/api/db`. `frontend/src/lib/chain.js` is the only module that talks to the
+escrow contract: it resolves the wallet provider (registered by `useWallet.js`),
+sends real transactions, waits for receipts, and decodes structs/events. It reads
+the vendored ABI from `frontend/src/lib/bountyBoardAbi.ts`, which is generated
+from the Hardhat artifact with `npm run export:abi` (root) — regenerate it after
+changing the contract. `frontend/src/lib/bountyChain.js` sits on top: it maps the
+UI's function names (`fundEscrowAndPublish`, `startWork`, `approveWork`,
+`withdrawEscrow`, `finalizeBounty`, `expireBounty`, …) onto contract calls.
+
+There is no indexer. The contract is the source of truth for money and lifecycle,
+so `hydrateBounty()` overlays `getBounty`/`getWorkers`/`getWinners` (plus the
+immutable `reviewPeriod`) onto the DB content row; the mirrored Postgres columns
+are a display cache refreshed on each write. List views (Home, Dashboard) read
+the mirrored columns; `readBountyRange()` (multicall) is the hook for reading the
+board purely from chain.
 
 Identity is Privy, not Supabase Auth. `<PrivyProvider>` lives in
 `frontend/src/main.jsx` (App ID in `VITE_PRIVY_APP_ID`); `AuthContext.jsx` reads
 the Privy user and obtains a Supabase session through `lib/privySupabase.js`,
 which either POSTs the Privy token to `VITE_PRIVY_SESSION_URL` (Edge Function) or
-mints a local HS256 JWT from `VITE_SUPABASE_JWT_SECRET` (dev only). With neither
+mints a local HS256 JWT from `VITE_SUPABASE_JWT_SECRET` (dev only — a production
+build fails if that secret is set, see `vite.config.js`). With neither
 set, and anonymous sign-ins disabled, it runs in degraded mode (Privy identity,
 no DB session) and exposes `sessionError`. The deterministic Supabase user id is
 uuidv5(Privy DID) — mirrored as `profiles.privy_did` — so the same person maps to

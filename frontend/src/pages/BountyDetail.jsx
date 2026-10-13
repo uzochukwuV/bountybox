@@ -17,7 +17,8 @@ import CommentThread from '@/components/bounty/CommentThread';
 import AttachmentList from '@/components/bounty/AttachmentList';
 import BountyActions from '@/components/bounty/BountyActions';
 import WorkersPanel from '@/components/bounty/WorkersPanel';
-import { approveWork, rejectSubmission } from '@/lib/bountyChain';
+import { approveWork, hydrateBounty, rejectSubmission } from '@/lib/bountyChain';
+import { describeRevert, readBountyCount } from '@/lib/chain';
 import { formatUSDC, shortAddress } from '@/lib/arc';
 import { useIdentity } from '@/lib/useIdentity';
 import { useToast } from '@/components/ui/use-toast';
@@ -60,12 +61,29 @@ export default function BountyDetail() {
         db.entities.BountyEvent.filter({ bounty_id: id }, { sort: '-logged_at', limit: 60 }),
         db.entities.BountyWorker.filter({ bounty_id: id }, { sort: 'started_at', limit: 100 }),
       ]);
-      setBounty(record);
+      // The chain is the source of truth for money/lifecycle: hydrate the row.
+      const hydrated = await hydrateBounty(record, { submissions: subs.items || [] });
+      setBounty(hydrated);
       setSubmissions(subs.items || []);
       setEvents(timeline.items || []);
       setWorkers(contributors.items || []);
       setMissing(false);
     } catch (error) {
+      // A row can exist onchain with no offchain content yet; surface that
+      // instead of a bare "not found".
+      let existsOnchain = false;
+      try {
+        const total = await readBountyCount();
+        existsOnchain = total > 0 && Number(id) < total;
+      } catch {
+        existsOnchain = false;
+      }
+      toast({
+        title: existsOnchain ? 'Onchain bounty' : 'Could not open this bounty',
+        description: existsOnchain
+          ? 'This bounty has no offchain content yet — its escrow lives on Arc.'
+          : describeRevert(error),
+      });
       setMissing(true);
     } finally {
       setLoading(false);
@@ -97,6 +115,8 @@ export default function BountyDetail() {
             } slot${slotsTotal - result.winners > 1 ? 's' : ''} still open.`,
       });
       await load();
+    } catch (error) {
+      toast({ title: 'Could not release USDC', description: describeRevert(error), variant: 'destructive' });
     } finally {
       setReleasing(false);
       setBusyId('');
@@ -109,6 +129,8 @@ export default function BountyDetail() {
       await rejectSubmission(bounty, submission, identity);
       toast({ title: 'Changes requested', description: 'The bounty went back to the worker.' });
       await load();
+    } catch (error) {
+      toast({ title: 'Could not request changes', description: describeRevert(error), variant: 'destructive' });
     } finally {
       setBusyId('');
     }
@@ -141,7 +163,8 @@ export default function BountyDetail() {
     );
   }
 
-  const isCreator = !!identity.email && bounty.creator_email === identity.email;
+  const wallet = (identity.walletAddress || '').toLowerCase();
+  const isCreator = !!wallet && (bounty.creator_wallet || '').toLowerCase() === wallet;
   const slots = bounty.winner_slots || 1;
   const winners = bounty.winners || [];
   const share = (bounty.reward_usdc || 0) / slots;

@@ -16,7 +16,12 @@
 
 const PRIVY_APP_ID = Deno.env.get('PRIVY_APP_ID') ?? '';
 const PRIVY_JWKS_URL = 'https://auth.privy.io/api/v1/apps/' + PRIVY_APP_ID + '/jwks.json';
+// Privy always sets `iss` to this value (see Privy access-token docs). Pinning it
+// means a token signed for a different issuer can never be replayed here.
+const PRIVY_ISSUER = 'privy.io';
 const JWT_SECRET = Deno.env.get('BRIDGE_JWT_SECRET') ?? Deno.env.get('SUPABASE_JWT_SECRET') ?? '';
+// Clock skew tolerance (seconds) for the time-based claims.
+const CLOCK_SKEW = 60;
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -61,13 +66,32 @@ async function uuidv5(name) {
 
 /* ---- verify the Privy token against its JWKS ---- */
 let jwksCache = { at: 0, keys: [] };
-async function privyKeys() {
-  if (Date.now() - jwksCache.at < 60 * 60 * 1000 && jwksCache.keys.length) return jwksCache.keys;
+let lastForcedFetch = 0;
+async function privyKeys(force = false) {
+  if (!force && Date.now() - jwksCache.at < 60 * 60 * 1000 && jwksCache.keys.length) {
+    return jwksCache.keys;
+  }
   const res = await fetch(PRIVY_JWKS_URL);
   if (!res.ok) throw new Error('Cannot fetch Privy JWKS (' + res.status + ')');
   const { keys } = await res.json();
   jwksCache = { at: Date.now(), keys: keys || [] };
   return jwksCache.keys;
+}
+
+async function selectKey(kid) {
+  // Match the token's `kid` strictly. There is deliberately no "first key"
+  // fallback: that would accept a token whose kid we do not recognize.
+  if (!kid) throw new Error('Token has no key id');
+  let key = (await privyKeys()).find((k) => k.kid === kid);
+  // Privy rotates signing keys; if the kid is unknown, refetch the JWKS once
+  // (bypassing the cache) before giving up, so rotation does not lock users out.
+  // Throttle that refetch so a burst of unknown kids cannot amplify into fetches.
+  if (!key && Date.now() - lastForcedFetch > 30 * 1000) {
+    lastForcedFetch = Date.now();
+    key = (await privyKeys(true)).find((k) => k.kid === kid);
+  }
+  if (!key) throw new Error('No matching JWKS key');
+  return key;
 }
 
 async function verifyPrivyToken(token) {
@@ -76,8 +100,12 @@ async function verifyPrivyToken(token) {
   const header = JSON.parse(new TextDecoder().decode(fromB64u(headerB64)));
   const payload = JSON.parse(new TextDecoder().decode(fromB64u(payloadB64)));
 
-  const key = (await privyKeys()).find((k) => k.kid === header.kid) || (await privyKeys())[0];
-  if (!key) throw new Error('No matching JWKS key');
+  // Only the algorithm Privy uses. Pinning it stops an attacker from steering us
+  // to a different (or absent) algorithm.
+  if (header.alg !== 'ES256') throw new Error('Unexpected token algorithm');
+
+  const key = await selectKey(header.kid);
+  if (key.alg && key.alg !== 'ES256') throw new Error('Unexpected signing key algorithm');
 
   // Privy signs with ES256 (P-256 ECDSA). JWS ECDSA signatures are raw r||s,
   // which is exactly the format WebCrypto's verify() expects.
@@ -95,8 +123,18 @@ async function verifyPrivyToken(token) {
     enc.encode(`${headerB64}.${payloadB64}`)
   );
   if (!ok) throw new Error('Invalid token signature');
-  if (payload.aud && payload.aud !== PRIVY_APP_ID) throw new Error('Token audience mismatch');
-  if (payload.exp && payload.exp * 1000 < Date.now()) throw new Error('Token expired');
+
+  // Claims. iss/aud pin the token to this app; exp/nbf bound its validity window.
+  if (payload.iss !== PRIVY_ISSUER) throw new Error('Token issuer mismatch');
+  const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  if (!aud.includes(PRIVY_APP_ID)) throw new Error('Token audience mismatch');
+  if (typeof payload.exp !== 'number' || payload.exp * 1000 < Date.now() - CLOCK_SKEW * 1000) {
+    throw new Error('Token expired');
+  }
+  if (typeof payload.nbf === 'number' && payload.nbf * 1000 > Date.now() + CLOCK_SKEW * 1000) {
+    throw new Error('Token not yet valid');
+  }
+  if (typeof payload.sub !== 'string' || !payload.sub) throw new Error('Token has no subject');
   return payload;
 }
 
@@ -116,6 +154,12 @@ async function signJwt(payload) {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors });
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+
+  // Refuse to mint rather than sign with an empty secret or verify against an
+  // empty app id.
+  if (!PRIVY_APP_ID || !JWT_SECRET) {
+    return json({ error: 'Session bridge is not configured' }, 500);
+  }
 
   try {
     const { accessToken } = await req.json().catch(() => ({}));

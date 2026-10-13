@@ -8,7 +8,9 @@
 //      Supabase `{ access_token, refresh_token }` session.
 //   2. Local HS256 mint (no Edge Function): sign a short-lived Supabase-compatible
 //      JWT in the browser from VITE_SUPABASE_JWT_SECRET. This is only as private
-//      as the bundle — for development, not production.
+//      as the bundle, so it is strictly development-only: the production build
+//      fails if the secret is set (vite.config.js), and hasLocalMint is forced off
+//      when env.PROD. Production must use option 1 (the Edge Function).
 //
 // If neither is configured the caller falls back to an anonymous Supabase
 // session (see AuthContext), which must be enabled in Supabase Auth settings.
@@ -19,7 +21,10 @@ const SESSION_URL = env.PRIVY_SESSION_URL;
 const JWT_SECRET = env.SUPABASE_JWT_SECRET || '';
 
 export const hasServerBridge = !!SESSION_URL;
-export const hasLocalMint = !SESSION_URL && !!JWT_SECRET;
+// The local mint is refused in a production bundle. vite.config.js also fails the
+// build outright if the secret is present at production build time; this is the
+// belt-and-braces runtime check in case a build slips through.
+export const hasLocalMint = !SESSION_URL && !!JWT_SECRET && !env.PROD;
 
 /* ------------------------------------------------------------------ */
 /* Local HS256 mint (development only)                                 */
