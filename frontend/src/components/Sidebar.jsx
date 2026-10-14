@@ -103,7 +103,7 @@ export default function Sidebar({ open, onClose }) {
               {ARC_CHAIN.name}
             </span>
             <span className="rounded-full bg-accent px-2 py-0.5 text-[10px] font-semibold text-accent-foreground">
-              Testnet
+              {ARC_CHAIN.testnet ? 'Testnet' : 'Mainnet'}
             </span>
           </div>
 

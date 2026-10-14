@@ -5,9 +5,7 @@ Built for **Arc Microgrants**: Arc mainnet is live
 BountyBox is one such experiment: a USDC-powered micro-task bounty platform
 where the smart contract holds the money, enforces the rules, and records the
 value-bearing lifecycle events, and the database holds the content. Not
-everything starts as a startup — sometimes it starts as a side project you
-built to find out whether the thing would work. This is that stage, deployed
-and working on Arc mainnet: one submission, one link. See
+everything starts as a startup. See
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the onchain/offchain split
 
 Arc uses USDC to pay gas, so you need a small amount of USDC on Arc to deploy
