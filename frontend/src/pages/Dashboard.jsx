@@ -118,14 +118,16 @@ export default function Dashboard() {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <a
-                  href={FAUCET_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-9 items-center rounded-full border border-border px-3 text-xs font-medium transition hover:border-primary/40 hover:text-primary"
-                >
-                  Get test USDC
-                </a>
+                {FAUCET_URL && (
+                  <a
+                    href={FAUCET_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex h-9 items-center rounded-full border border-border px-3 text-xs font-medium transition hover:border-primary/40 hover:text-primary"
+                  >
+                    Get test USDC
+                  </a>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"

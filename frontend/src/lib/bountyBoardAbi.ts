@@ -12,11 +12,6 @@ export const BOUNTYBOARD_ABI = [
         "internalType": "contract IERC20",
         "name": "usdc_",
         "type": "address"
-      },
-      {
-        "internalType": "uint64",
-        "name": "reviewPeriod_",
-        "type": "uint64"
       }
     ],
     "stateMutability": "nonpayable",
@@ -49,7 +44,17 @@ export const BOUNTYBOARD_ABI = [
   },
   {
     "inputs": [],
+    "name": "InsufficientSurplus",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "InvalidDeadlines",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "InvalidMaxWorkers",
     "type": "error"
   },
   {
@@ -69,6 +74,11 @@ export const BOUNTYBOARD_ABI = [
   },
   {
     "inputs": [],
+    "name": "MaxWorkersReached",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "NotCreator",
     "type": "error"
   },
@@ -80,6 +90,11 @@ export const BOUNTYBOARD_ABI = [
   {
     "inputs": [],
     "name": "NothingPaid",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "NothingToRescue",
     "type": "error"
   },
   {
@@ -205,6 +220,18 @@ export const BOUNTYBOARD_ABI = [
         "internalType": "bytes32",
         "name": "contentHash",
         "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint32",
+        "name": "maxWorkers",
+        "type": "uint32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint64",
+        "name": "reviewPeriod",
+        "type": "uint64"
       }
     ],
     "name": "BountyCreated",
@@ -264,6 +291,25 @@ export const BOUNTYBOARD_ABI = [
       }
     ],
     "name": "BountyWinnerPaid",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
+      }
+    ],
+    "name": "SurplusRescued",
     "type": "event"
   },
   {
@@ -347,6 +393,11 @@ export const BOUNTYBOARD_ABI = [
         "type": "uint32"
       },
       {
+        "internalType": "uint32",
+        "name": "maxWorkers",
+        "type": "uint32"
+      },
+      {
         "internalType": "uint64",
         "name": "applicationDeadline",
         "type": "uint64"
@@ -354,6 +405,11 @@ export const BOUNTYBOARD_ABI = [
       {
         "internalType": "uint64",
         "name": "submissionDeadline",
+        "type": "uint64"
+      },
+      {
+        "internalType": "uint64",
+        "name": "reviewPeriod",
         "type": "uint64"
       },
       {
@@ -427,6 +483,11 @@ export const BOUNTYBOARD_ABI = [
             "type": "uint64"
           },
           {
+            "internalType": "uint64",
+            "name": "reviewPeriod",
+            "type": "uint64"
+          },
+          {
             "internalType": "enum BountyBoard.Status",
             "name": "status",
             "type": "uint8"
@@ -434,6 +495,11 @@ export const BOUNTYBOARD_ABI = [
           {
             "internalType": "uint32",
             "name": "maxWinners",
+            "type": "uint32"
+          },
+          {
+            "internalType": "uint32",
+            "name": "maxWorkers",
             "type": "uint32"
           },
           {
@@ -600,16 +666,21 @@ export const BOUNTYBOARD_ABI = [
     "type": "function"
   },
   {
-    "inputs": [],
-    "name": "reviewPeriod",
-    "outputs": [
+    "inputs": [
       {
-        "internalType": "uint64",
-        "name": "",
-        "type": "uint64"
+        "internalType": "address",
+        "name": "to",
+        "type": "address"
+      },
+      {
+        "internalType": "uint256",
+        "name": "amount",
+        "type": "uint256"
       }
     ],
-    "stateMutability": "view",
+    "name": "rescueSurplus",
+    "outputs": [],
+    "stateMutability": "nonpayable",
     "type": "function"
   },
   {
@@ -623,6 +694,32 @@ export const BOUNTYBOARD_ABI = [
     "name": "startWorking",
     "outputs": [],
     "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "surplus",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "totalEscrowed",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
     "type": "function"
   },
   {

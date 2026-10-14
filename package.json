@@ -3,13 +3,17 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "export:abi": "hardhat run scripts/export-abi.ts"
+    "export:abi": "hardhat run scripts/export-abi.ts",
+    "deploy:local": "hardhat ignition deploy ignition/modules/BountyBoardLocal.ts",
+    "deploy:testnet": "dotenv -- hardhat ignition deploy ignition/modules/BountyBoard.ts --network arcTestnet",
+    "deploy:mainnet": "dotenv -- hardhat ignition deploy ignition/modules/BountyBoard.ts --network arcMainnet --build-profile production"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-ignition": "^3.1.8",
     "@nomicfoundation/hardhat-toolbox-viem": "^5.0.7",
     "@openzeppelin/contracts": "^5.6.1",
     "@types/node": "^22.20.5",
+    "dotenv-cli": "^11.0.0",
     "forge-std": "github:foundry-rs/forge-std#v1.16.2",
     "hardhat": "^3.19.0",
     "typescript": "~6.0.3",

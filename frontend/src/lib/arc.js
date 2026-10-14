@@ -9,22 +9,38 @@
 import { createPublicClient, formatUnits, http, parseUnits } from 'viem';
 import { env } from '@/lib/env';
 
-export const ARC_CHAIN = {
-  id: 5042002,
-  // Alias kept for call sites that still read `chainId`.
-  chainId: 5042002,
-  name: 'Arc Testnet',
-  nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 18 },
-  rpcUrls: { default: { http: ['https://rpc.testnet.arc.io'] } },
-  blockExplorers: { default: { name: 'ArcScan', url: 'https://explorer.testnet.arc.io' } },
-  testnet: true,
+export const ARC_NETWORKS = {
+  testnet: {
+    id: 5042002,
+    // Alias kept for call sites that still read `chainId`.
+    chainId: 5042002,
+    name: 'Arc Testnet',
+    nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 18 },
+    rpcUrls: { default: { http: ['https://rpc.testnet.arc.io'] } },
+    blockExplorers: { default: { name: 'ArcScan', url: 'https://explorer.testnet.arc.io' } },
+    testnet: true,
+  },
+  mainnet: {
+    id: 5042,
+    chainId: 5042,
+    name: 'Arc',
+    nativeCurrency: { name: 'USD Coin', symbol: 'USDC', decimals: 18 },
+    rpcUrls: { default: { http: ['https://rpc.mainnet.arc.io'] } },
+    blockExplorers: { default: { name: 'ArcScan', url: 'https://explorer.arc.io' } },
+    testnet: false,
+  },
 };
+
+// Selected by VITE_ARC_NETWORK ('testnet' default). Every chain read/write in
+// the app goes through this object, so switching networks is one variable.
+export const ARC_CHAIN =
+  ARC_NETWORKS[env.ARC_NETWORK] || ARC_NETWORKS.testnet;
 
 /** ERC-20 USDC interface predeployed on Arc (6 decimals). */
 export const USDC_ADDRESS = '0x3600000000000000000000000000000000000000';
 export const USDC_DECIMALS = 6;
 
-export const FAUCET_URL = 'https://faucet.circle.com';
+export const FAUCET_URL = ARC_CHAIN.testnet ? 'https://faucet.circle.com' : null;
 
 /** Escrow contract address, set after `ignition deploy` (Phase 3). */
 export const ESCROW_ADDRESS = env.BOUNTYBOARD_ADDRESS;

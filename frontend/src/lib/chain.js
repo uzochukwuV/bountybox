@@ -98,8 +98,10 @@ function normalizeBounty(raw) {
     creator: raw.creator,
     applicationDeadline: Number(raw.applicationDeadline),
     submissionDeadline: Number(raw.submissionDeadline),
+    reviewPeriod: Number(raw.reviewPeriod),
     status: Number(raw.status),
     maxWinners: Number(raw.maxWinners),
+    maxWorkers: Number(raw.maxWorkers),
     winnerCount: Number(raw.winnerCount),
     workerCount: Number(raw.workerCount),
     rewardPerWinner: raw.rewardPerWinner,
@@ -178,17 +180,13 @@ export async function readIsWinner(id, worker) {
   });
 }
 
-// reviewPeriod is immutable per deployment, so cache it after the first read.
-let reviewPeriodCache = null;
-export async function getReviewPeriod() {
-  if (reviewPeriodCache !== null) return reviewPeriodCache;
-  const value = await publicClient.readContract({
+/** USDC held above accounted escrow; recoverable via rescueSurplus. */
+export async function readSurplus() {
+  return publicClient.readContract({
     address: requireEscrow(),
     abi: BOUNTYBOARD_ABI,
-    functionName: 'reviewPeriod',
+    functionName: 'surplus',
   });
-  reviewPeriodCache = Number(value);
-  return reviewPeriodCache;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -278,15 +276,19 @@ function parseBountyId(receipt) {
 export async function writeCreateBounty({
   rewardPerWinner,
   maxWinners,
+  maxWorkers,
   applicationDeadline,
   submissionDeadline,
+  reviewPeriod,
   contentHash,
 }) {
   const { hash, receipt } = await send('createBounty', [
     rewardPerWinner,
     maxWinners,
+    maxWorkers,
     BigInt(applicationDeadline),
     BigInt(submissionDeadline),
+    BigInt(reviewPeriod),
     contentHash,
   ]);
   const id = parseBountyId(receipt);
@@ -312,6 +314,11 @@ export async function writeCancelBounty(id) {
 
 export async function writeExpireBounty(id) {
   return send('expireBounty', [BigInt(id)]);
+}
+
+/** rescueSurplus(to, amount) — recovers stray USDC sent outside createBounty. */
+export async function writeRescueSurplus(to, amount) {
+  return send('rescueSurplus', [to, amount]);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -357,6 +364,9 @@ export function describeRevert(error) {
   const messages = {
     ZeroReward: 'The reward must be greater than zero.',
     InvalidWinners: 'Pick at least one winner.',
+    InvalidMaxWorkers: 'The worker cap must be at least the number of winners.',
+    InvalidReviewPeriod: 'Set a review period greater than zero.',
+    MaxWorkersReached: 'This bounty is full — the worker cap is reached.',
     InvalidDeadlines: 'Deadlines are invalid — submissions must close after applications.',
     UnknownBounty: 'That bounty does not exist onchain.',
     NotCreator: 'Only the bounty creator can do that.',
@@ -370,6 +380,8 @@ export function describeRevert(error) {
     ExpiryNotReached: 'This bounty cannot be expired yet.',
     WorkersPresent: 'Someone is already working — the escrow is locked.',
     NothingPaid: 'Accept at least one submission before closing.',
+    NothingToRescue: 'There is no stray USDC to rescue.',
+    InsufficientSurplus: 'That amount exceeds the stray USDC balance.',
     SafeERC20FailedOperation: 'USDC transfer failed — check your balance and allowance.',
   };
   if (messages[name]) return messages[name];

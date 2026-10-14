@@ -13,6 +13,7 @@
 import { keccak256, toHex } from 'viem';
 
 import { db } from '@/api/db';
+import { supabase } from '@/api/supabaseClient';
 import { formatUSDC, formatUSDCUnits, parseUSDC } from '@/lib/arc';
 import { resolveDeadlines } from '@/lib/deadlines';
 import {
@@ -20,7 +21,6 @@ import {
   appStatusOf,
   escrowStatusOf,
   ensureUsdcAllowance,
-  getReviewPeriod,
   readBounty,
   readUsdcBalance,
   writeApproveWork,
@@ -33,6 +33,11 @@ import {
 
 const now = () => new Date().toISOString();
 const round = (value) => Math.round(value * 100) / 100;
+
+// Defaults for the per-bounty chain params when a draft predates the form
+// fields that collect them.
+const DEFAULT_MAX_WORKERS = 5;
+const DEFAULT_REVIEW_DAYS = 3;
 
 /** The pot divided evenly across the winner slots. */
 export function potShare(bounty) {
@@ -83,6 +88,21 @@ function perWinnerBaseUnits(totalBaseUnits, slots) {
     );
   }
   return per;
+}
+
+/**
+ * The bounty row insert runs under RLS (`creator_id = auth.uid()`), so a
+ * missing database session fails AFTER the escrow tx would lock funds
+ * onchain. Fail fast instead: no session, no chain transaction.
+ */
+async function requireDbSession() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data?.user) {
+    throw new Error(
+      'No database session — open /login to see the exact auth error, sign out and back in, then retry. No escrow was funded.'
+    );
+  }
+  return data.user;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -139,13 +159,6 @@ export async function hydrateBounty(row, { submissions = [] } = {}) {
 
   const pot = Number(formatUSDCUnits(chain.rewardPerWinner * BigInt(chain.maxWinners)));
 
-  let reviewPeriod = null;
-  try {
-    reviewPeriod = await getReviewPeriod();
-  } catch {
-    reviewPeriod = null;
-  }
-
   return {
     ...row,
     status: appStatusOf(chain),
@@ -153,6 +166,7 @@ export async function hydrateBounty(row, { submissions = [] } = {}) {
     reward_usdc: pot,
     winner_slots: chain.maxWinners,
     winner_count: chain.winnerCount,
+    max_workers: chain.maxWorkers,
     worker_wallets: chain.workers,
     winners,
     chain_status: chain.status,
@@ -162,7 +176,7 @@ export async function hydrateBounty(row, { submissions = [] } = {}) {
       formatUSDCUnits(chain.rewardPerWinner * BigInt(chain.maxWinners - chain.winnerCount))
     ),
     is_open: chain.status === CHAIN_STATUS.Open,
-    review_period: reviewPeriod,
+    review_period: chain.reviewPeriod,
   };
 }
 
@@ -201,11 +215,16 @@ async function logEvent(bounty_id, event_type, payload) {
  */
 export async function fundEscrowAndPublish({ draft, identity }) {
   if (!identity?.walletAddress) throw new Error('Connect a wallet before funding escrow.');
+  await requireDbSession();
 
   const slots = Number(draft.winner_slots) || 1;
   const totalBaseUnits = parseUSDC(draft.reward_usdc);
   const rewardPerWinner = perWinnerBaseUnits(totalBaseUnits, slots);
   const escrow = rewardPerWinner * BigInt(slots);
+  // Worker cap and review window are per-bounty chain params. The form collects
+  // them; fall back to safe defaults for drafts that predate the fields.
+  const maxWorkers = Math.max(slots, Number(draft.max_workers) || DEFAULT_MAX_WORKERS);
+  const reviewPeriod = BigInt(Math.max(1, Number(draft.review_period_days) || DEFAULT_REVIEW_DAYS) * 86400);
 
   const balance = await readUsdcBalance(identity.walletAddress);
   if (balance < escrow) {
@@ -222,13 +241,19 @@ export async function fundEscrowAndPublish({ draft, identity }) {
   const { hash, id: onchainId } = await writeCreateBounty({
     rewardPerWinner,
     maxWinners: slots,
+    maxWorkers,
     applicationDeadline,
     submissionDeadline,
+    reviewPeriod,
     contentHash,
   });
 
+  // max_workers / review_period_days are chain params, not DB columns — the
+  // chain stays the source of truth (hydrateBounty reads them back onchain).
+  const { max_workers: _maxWorkers, review_period_days: _reviewDays, ...content } = draft;
+
   const bounty = await db.entities.Bounty.create({
-    ...draft,
+    ...content,
     title: draft.title,
     reward_usdc: Number(formatUSDCUnits(escrow)),
     winner_slots: slots,

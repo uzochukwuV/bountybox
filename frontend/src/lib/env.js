@@ -22,6 +22,8 @@ export const env = {
   PRIVY_APP_ID: read('VITE_PRIVY_APP_ID'),
   PRIVY_SESSION_URL: read('VITE_PRIVY_SESSION_URL'),
   BOUNTYBOARD_ADDRESS: read('VITE_BOUNTYBOARD_ADDRESS'),
+  // 'testnet' (default) or 'mainnet'. Selects the Arc chain in lib/arc.js.
+  ARC_NETWORK: read('VITE_ARC_NETWORK') || 'testnet',
   // Dev-only in-browser mint; never injected at runtime (must not ship in prod).
   SUPABASE_JWT_SECRET: import.meta.env.VITE_SUPABASE_JWT_SECRET || '',
   // Vite sets this statically; privySupabase.js uses it to disable the dev mint.

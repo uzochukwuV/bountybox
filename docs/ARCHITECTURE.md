@@ -34,6 +34,8 @@ to display who is working.
 | Who was paid | `isWinner` + `Bounty.winners` | Accepted winners so far |
 | Worker / winner counts | `workerCount`, `winnerCount` | Gate withdrawal and completion |
 | Prize structure | `rewardPerWinner`, `maxWinners` | Escrow = `rewardPerWinner * maxWinners` |
+| Worker cap | `maxWorkers` (>= `maxWinners`) | Bounds the `startWorking` set per bounty |
+| Review window | `reviewPeriod` (per bounty) | Grace period after `submissionDeadline` before expiry |
 | Reward held | `remainingReward(id)` | Unclaimed winner slots |
 | Escrow status | `Bounty.status` + `isFunded()` | Funds in or out |
 | Application deadline | `Bounty.applicationDeadline` | Last time to `startWorking` |
@@ -91,6 +93,10 @@ records and notifications. None of this is required to move funds.
 - `expireBounty` guarantees funds can never be locked: unspent escrow is refunded
   to the creator by anyone after the deadlines. Already-paid winners keep their
   rewards; only the remainder is refunded.
+- Stray USDC sent to the contract outside `createBounty` (ERC-20 has no receive
+  hook, so it cannot be rejected on arrival) is recoverable via the
+  permissionless `rescueSurplus(to, amount)`. Only the surplus above accounted
+  escrow (`totalEscrowed`) is movable, so bounty funds are never at risk.
 
 ## Worker incentives (read this before shipping)
 
@@ -99,8 +105,8 @@ is not guaranteed until `approveWork` lands. Consequences the product must handl
 offchain:
 
 - **Duplicate work is possible.** Many workers may do the same task and only
-  `maxWinners` are paid. `getWorkers` is public, so the UI can show "3 working,
-  1 spot left" to discourage piling on.
+  `maxWinners` are paid. `maxWorkers` caps how many can start, and `getWorkers`
+  is public, so the UI can show "3 working, 1 spot left" to discourage piling on.
 - **No onchain worker protection.** There is no `claimUnreviewed`: the creator
   always chooses. If you later want to protect a worker who finished but is
   ignored, add a bounded submit → accept → claim flow rather than trusting the

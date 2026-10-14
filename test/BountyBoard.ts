@@ -7,6 +7,7 @@ import { network } from "hardhat";
 const REWARD = 100_000_000n; // 100 USDC per winner
 const REVIEW_PERIOD = 86_400n; // 1 day
 const DAY = 86_400n;
+const MAX_WORKERS = 10;
 
 // viem types byte params as `0x${string}`; build them explicitly.
 const b32 = (s: string) => `0x${s.repeat(32)}` as const;
@@ -18,10 +19,10 @@ describe("BountyBoard", async function () {
   const { viem, networkHelpers } = await network.create();
 
   async function deploy() {
-    const [creator, alice, bob, carol] = await viem.getWalletClients();
+    const [creator, alice, bob, carol, dave] = await viem.getWalletClients();
     const publicClient = await viem.getPublicClient();
     const usdc = await viem.deployContract("MockUSDC");
-    const board = await viem.deployContract("BountyBoard", [usdc.address, REVIEW_PERIOD]);
+    const board = await viem.deployContract("BountyBoard", [usdc.address]);
 
     await usdc.write.mint([creator.account.address, 1_000_000_000n]); // 1000 USDC
     await usdc.write.approve([board.address, 2n ** 256n - 1n], {
@@ -29,12 +30,12 @@ describe("BountyBoard", async function () {
     });
 
     const now = BigInt((await publicClient.getBlock()).timestamp);
-    return { creator, alice, bob, carol, usdc, board, now };
+    return { creator, alice, bob, carol, dave, usdc, board, now };
   }
 
   async function create(board: any, creator: any, maxWinners: number, now: bigint) {
     await board.write.createBounty(
-      [REWARD, maxWinners, now + DAY, now + 2n * DAY, b32("11")],
+      [REWARD, maxWinners, MAX_WORKERS, now + DAY, now + 2n * DAY, REVIEW_PERIOD, b32("11")],
       { account: creator.account },
     );
   }
@@ -43,12 +44,13 @@ describe("BountyBoard", async function () {
     const { creator, alice, bob, usdc, board, now } = await networkHelpers.loadFixture(deploy);
 
     await viem.assertions.emitWithArgs(
-      board.write.createBounty([REWARD, 1, now + DAY, now + 2n * DAY, b32("11")], {
-        account: creator.account,
-      }),
+      board.write.createBounty(
+        [REWARD, 1, MAX_WORKERS, now + DAY, now + 2n * DAY, REVIEW_PERIOD, b32("11")],
+        { account: creator.account },
+      ),
       board,
       "BountyCreated",
-      [0n, creator.account.address, REWARD, 1, now + DAY, now + 2n * DAY, b32("11")],
+      [0n, creator.account.address, REWARD, 1, now + DAY, now + 2n * DAY, b32("11"), MAX_WORKERS, REVIEW_PERIOD],
     );
 
     assert.equal(await usdc.read.balanceOf([board.address]), REWARD);
@@ -103,6 +105,37 @@ describe("BountyBoard", async function () {
     );
   });
 
+  it("enforces the maxWorkers cap set at creation", async function () {
+    const { creator, alice, bob, carol, board, now } = await networkHelpers.loadFixture(deploy);
+
+    await board.write.createBounty(
+      [REWARD, 1, 2, now + DAY, now + 2n * DAY, REVIEW_PERIOD, b32("11")],
+      { account: creator.account },
+    );
+
+    await board.write.startWorking([0n], { account: alice.account });
+    await board.write.startWorking([0n], { account: bob.account });
+
+    await viem.assertions.revertWithCustomError(
+      board.write.startWorking([0n], { account: carol.account }),
+      board,
+      "MaxWorkersReached",
+    );
+  });
+
+  it("rejects a worker cap below the winner count", async function () {
+    const { creator, board, now } = await networkHelpers.loadFixture(deploy);
+
+    await viem.assertions.revertWithCustomError(
+      board.write.createBounty(
+        [REWARD, 3, 2, now + DAY, now + 2n * DAY, REVIEW_PERIOD, b32("11")],
+        { account: creator.account },
+      ),
+      board,
+      "InvalidMaxWorkers",
+    );
+  });
+
   it("finalize closes early with fewer than maxWinners and refunds the creator", async function () {
     const { creator, alice, usdc, board, now } = await networkHelpers.loadFixture(deploy);
 
@@ -125,6 +158,32 @@ describe("BountyBoard", async function () {
     const { creator, usdc, board, now } = await networkHelpers.loadFixture(deploy);
     await create(board, creator, 5, now);
     assert.equal(await usdc.read.balanceOf([board.address]), REWARD * 5n);
+    assert.equal(await board.read.totalEscrowed(), REWARD * 5n);
+  });
+
+  it("rescues stray USDC without touching escrow", async function () {
+    const { creator, alice, dave, usdc, board, now } = await networkHelpers.loadFixture(deploy);
+
+    await create(board, creator, 2, now); // 200 escrowed
+
+    // Accidental direct transfer, bypassing createBounty.
+    await usdc.write.mint([dave.account.address, 50_000_000n]);
+    await usdc.write.transfer([board.address, 50_000_000n], { account: dave.account });
+    assert.equal(await board.read.surplus(), 50_000_000n);
+
+    await board.write.rescueSurplus([alice.account.address, 50_000_000n], {
+      account: dave.account,
+    });
+
+    assert.equal(await usdc.read.balanceOf([alice.account.address]), REWARD / 2n);
+    assert.equal(await board.read.surplus(), 0n);
+    assert.equal(await usdc.read.balanceOf([board.address]), REWARD * 2n);
+
+    await viem.assertions.revertWithCustomError(
+      board.write.rescueSurplus([alice.account.address, 1n], { account: dave.account }),
+      board,
+      "NothingToRescue",
+    );
   });
 
   it("blocks the creator from withdrawing once someone is working", async function () {

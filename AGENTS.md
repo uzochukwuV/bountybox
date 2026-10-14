@@ -60,8 +60,8 @@ UI's function names (`fundEscrowAndPublish`, `startWork`, `approveWork`,
 `withdrawEscrow`, `finalizeBounty`, `expireBounty`, …) onto contract calls.
 
 There is no indexer. The contract is the source of truth for money and lifecycle,
-so `hydrateBounty()` overlays `getBounty`/`getWorkers`/`getWinners` (plus the
-immutable `reviewPeriod`) onto the DB content row; the mirrored Postgres columns
+so `hydrateBounty()` overlays `getBounty`/`getWorkers`/`getWinners` (including the
+per-bounty `maxWorkers`/`reviewPeriod`) onto the DB content row; the mirrored Postgres columns
 are a display cache refreshed on each write. List views (Home, Dashboard) read
 the mirrored columns; `readBountyRange()` (multicall) is the hook for reading the
 board purely from chain.

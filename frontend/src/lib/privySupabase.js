@@ -102,7 +102,9 @@ async function fetchServerSession(identity) {
   const response = await fetch(SESSION_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accessToken: identity.accessToken }),
+    // Email is contact metadata for the provisioned auth.users row only;
+    // the user id always comes from the verified Privy token's `sub`.
+    body: JSON.stringify({ accessToken: identity.accessToken, email: identity.email || null }),
   });
   if (!response.ok) throw new Error(`Session bridge failed (${response.status})`);
   const session = await response.json();

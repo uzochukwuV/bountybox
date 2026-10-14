@@ -78,6 +78,7 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       // Privy login succeeded but the Supabase session could not be established.
       // Keep the app usable (wallet flows work) and surface the reason.
+      console.error('[auth] database session failed:', error);
       setSessionError(error.message || 'Could not establish a database session');
       setUser({ id: null, ...identity, role: 'user', degraded: true });
       setIsAuthenticated(true);

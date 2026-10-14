@@ -54,6 +54,8 @@ const EMPTY = {
   category: 'Engineering',
   complexity: 'standard',
   winner_slots: '1',
+  max_workers: '5',
+  review_period_days: '3',
   tags: '',
   reward_usdc: '',
   due_date: '',
@@ -82,6 +84,8 @@ export default function NewBounty() {
   const set = (patch) => setForm((previous) => ({ ...previous, ...patch }));
   const reward = Number(form.reward_usdc) || 0;
   const slots = Number(form.winner_slots) || 1;
+  const maxWorkers = Number(form.max_workers) || 0;
+  const reviewDays = Number(form.review_period_days) || 0;
 
   const errors = {
     title: form.title.trim().length < 8 ? 'Give the bounty a clear title (at least 8 characters).' : '',
@@ -94,9 +98,17 @@ export default function NewBounty() {
       reward > 0 && slots > 1 && Math.round(reward * 1e6) % slots !== 0
         ? `The reward must split evenly across ${slots} winners.`
         : '',
+    workers:
+      maxWorkers < 1
+        ? 'Set how many contributors may start (at least 1).'
+        : maxWorkers < slots
+          ? `The worker cap must cover the ${slots} winner slot${slots > 1 ? 's' : ''}.`
+          : '',
+    review:
+      reviewDays < 1 ? 'Set a review window of at least 1 day.' : '',
     deadlines: validateDeadlines(form),
   };
-  const stepOneValid = !errors.title && !errors.description && !errors.reward && !errors.split && !errors.deadlines;
+  const stepOneValid = !errors.title && !errors.description && !errors.reward && !errors.split && !errors.workers && !errors.review && !errors.deadlines;
 
   const balance = identity.balance;
   const shortfall = Math.max(0, reward - balance);
@@ -124,6 +136,8 @@ export default function NewBounty() {
             .filter(Boolean),
           reward_usdc: reward,
           winner_slots: slots,
+          max_workers: maxWorkers,
+          review_period_days: reviewDays,
           ...(form.due_date ? { due_date: form.due_date } : {}),
           ...(form.submission_deadline ? { submission_deadline: form.submission_deadline } : {}),
           attachments,
@@ -258,7 +272,7 @@ export default function NewBounty() {
                   />
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="reward">Reward (USDC)</Label>
                     <Input
@@ -316,6 +330,44 @@ export default function NewBounty() {
                       <p className="text-[11px] text-destructive">{errors.deadlines}</p>
                     )}
                   </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="max-workers">Worker cap</Label>
+                    <Input
+                      id="max-workers"
+                      type="number"
+                      min={slots}
+                      value={form.max_workers}
+                      onChange={(event) => set({ max_workers: event.target.value })}
+                      placeholder="5"
+                      data-testid="bounty-max-workers"
+                    />
+                    {errors.workers ? (
+                      <p className="text-[11px] text-destructive">{errors.workers}</p>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">
+                        At most {maxWorkers || '—'} contributors can start.
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="review-days">Review window (days)</Label>
+                    <Input
+                      id="review-days"
+                      type="number"
+                      min="1"
+                      value={form.review_period_days}
+                      onChange={(event) => set({ review_period_days: event.target.value })}
+                      placeholder="3"
+                      data-testid="bounty-review-days"
+                    />
+                    {errors.review ? (
+                      <p className="text-[11px] text-destructive">{errors.review}</p>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">
+                        Refundable by anyone after close + {reviewDays || '—'}d silence.
+                      </p>
+                    )}
+                  </div>
                 </div>
 
                 <div className="space-y-1.5">
@@ -368,6 +420,8 @@ export default function NewBounty() {
                         : `${slots} winners · ${formatUSDC(reward / slots)} USDC each`
                     }
                   />
+                  <SummaryRow label="Worker cap" value={`Up to ${maxWorkers} contributors`} />
+                  <SummaryRow label="Review window" value={`${reviewDays} day${reviewDays > 1 ? 's' : ''} after close`} />
                   <SummaryRow label="Network fee" value="Paid in USDC gas on Arc" />
                 </div>
 
@@ -393,14 +447,16 @@ export default function NewBounty() {
                         <p className="text-[11px] text-tone-red">
                           You need {formatUSDC(shortfall)} more USDC to fund this bounty.
                         </p>
-                        <a
-                          href={FAUCET_URL}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="inline-flex h-8 items-center rounded-full border border-border px-3 text-xs font-medium transition hover:border-primary/40 hover:text-primary"
-                        >
-                          Get test USDC from the faucet
-                        </a>
+                        {FAUCET_URL && (
+                          <a
+                            href={FAUCET_URL}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex h-8 items-center rounded-full border border-border px-3 text-xs font-medium transition hover:border-primary/40 hover:text-primary"
+                          >
+                            Get test USDC from the faucet
+                          </a>
+                        )}
                       </div>
                     )}
                   </div>

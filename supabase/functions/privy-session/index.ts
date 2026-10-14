@@ -10,8 +10,9 @@
 //   supabase secrets set PRIVY_APP_ID=<app id>
 //   supabase secrets set BRIDGE_JWT_SECRET=<project JWT secret>
 //   # (SUPABASE_JWT_SECRET cannot be set: the CLI reserves the SUPABASE_ prefix.)
+//   # SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY are injected automatically.
 //
-// Request:  POST { accessToken: "<privy access token>" }
+// Request:  POST { accessToken: "<privy access token>", email?: "<user email>" }
 // Response: { access_token, refresh_token }
 
 const PRIVY_APP_ID = Deno.env.get('PRIVY_APP_ID') ?? '';
@@ -22,6 +23,10 @@ const PRIVY_ISSUER = 'privy.io';
 const JWT_SECRET = Deno.env.get('BRIDGE_JWT_SECRET') ?? Deno.env.get('SUPABASE_JWT_SECRET') ?? '';
 // Clock skew tolerance (seconds) for the time-based claims.
 const CLOCK_SKEW = 60;
+// Injected automatically into every Edge Function; used only for the Admin API
+// call that provisions the auth.users row (never exposed to the browser).
+const PROJECT_URL = Deno.env.get('SUPABASE_URL') ?? '';
+const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -138,8 +143,7 @@ async function verifyPrivyToken(token) {
   return payload;
 }
 
-/* ---- mint a Supabase session ---- */
-async function signJwt(payload) {
+/* ---- mint a Supabase session ---- */async function signJwt(payload) {
   const header = b64uStr(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const body = b64uStr(JSON.stringify(payload));
   const cryptoKey = await crypto.subtle.importKey(
@@ -149,6 +153,50 @@ async function signJwt(payload) {
     await crypto.subtle.sign('HMAC', cryptoKey, enc.encode(`${header}.${body}`))
   );
   return `${header}.${body}.${b64uBytes(sig)}`;
+}
+
+/* ---- ensure the auth.users row exists ----
+ *
+ * Current gotrue refuses a session whose `sub` has no auth.users row
+ * ("User from sub claim in JWT does not exist"), so the first login for a
+ * Privy DID provisions one via the Admin API with the deterministic id.
+ * The email is contact metadata only — authority stays with the verified
+ * Privy token, whose `sub` fixes the user id. Wallet-only logins (no email)
+ * get a synthetic placeholder, unique per id.
+ */
+async function ensureAuthUser(sub, did, email) {
+  const headers = {
+    apikey: SERVICE_KEY,
+    Authorization: `Bearer ${SERVICE_KEY}`,
+    'Content-Type': 'application/json',
+  };
+  const clean = (email || '').trim();
+  const loginEmail = /.+@.+\..+/.test(clean) ? clean : `${sub}@privy.local`;
+
+  const existing = await fetch(`${PROJECT_URL}/auth/v1/admin/users/${sub}`, { headers });
+  if (existing.ok) return;
+
+  const created = await fetch(`${PROJECT_URL}/auth/v1/admin/users`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      id: sub,
+      aud: 'authenticated',
+      role: 'authenticated',
+      email: loginEmail,
+      email_confirm: true,
+      user_metadata: { privy_did: did },
+      app_metadata: { privy_did: did },
+    }),
+  });
+  if (created.ok) return;
+  // 422 means the row (or email) already exists — re-check the id before
+  // failing so a check-then-create race does not lock the user out.
+  if (created.status === 422) {
+    const retry = await fetch(`${PROJECT_URL}/auth/v1/admin/users/${sub}`, { headers });
+    if (retry.ok) return;
+  }
+  throw new Error('Could not provision auth user (' + created.status + ')');
 }
 
 Deno.serve(async (req) => {
@@ -162,12 +210,13 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { accessToken } = await req.json().catch(() => ({}));
+    const { accessToken, email } = await req.json().catch(() => ({}));
     if (!accessToken) return json({ error: 'accessToken is required' }, 400);
 
     const claims = await verifyPrivyToken(accessToken);
     const did = claims.sub;
     const sub = await uuidv5(did);
+    await ensureAuthUser(sub, did, email);
     const now = Math.floor(Date.now() / 1000);
     const expiresIn = 3600;
 

@@ -41,7 +41,9 @@ export default function BountyActions({ bounty, submissions, workers = [], ident
   const pending = submissions.filter((submission) => submission.status === 'pending');
 
   const openForWork = bounty.status === 'open' || bounty.status === 'in_progress';
-  const canStart = !isCreator && !isWorker && openForWork;
+  const workerCap = bounty.max_workers || null;
+  const workersFull = workerCap !== null && started >= workerCap;
+  const canStart = !isCreator && !isWorker && openForWork && !workersFull;
   const canSubmit =
     !isCreator &&
     isWorker &&
@@ -145,6 +147,8 @@ export default function BountyActions({ bounty, submissions, workers = [], ident
         'This escrow can’t be closed with no winners yet — accept a submission to pay someone, or wait for the expiry deadline to reclaim the unspent reward.';
     } else if (isCreator && pending.length === 0) {
       notice = 'No submissions to review yet. Accept any contributor’s submission to release the reward.';
+    } else if (!isCreator && workersFull) {
+      notice = `This bounty is full — ${started} of ${workerCap} worker spots are taken.`;
     } else if (isWorker) {
       notice = 'Your submission is in review — you are paid if the creator accepts it.';
     } else if (!isCreator && bounty.status === 'in_review') {
