@@ -1,16 +1,39 @@
 # BountyBox — USDC micro-task bounties on Arc
 
-Built for **Arc Microgrants**: Arc mainnet is live
+**Live:** [bountybox-brown.vercel.app](https://bountybox-brown.vercel.app/) ·
+**Contract (Arc mainnet):** [`0x57bC93735d190c24c0215DB48f52DEc796770e21`](https://explorer.arc.io/address/0x57bC93735d190c24c0215DB48f52DEc796770e21)
 
-BountyBox is one such experiment: a USDC-powered micro-task bounty platform
-where the smart contract holds the money, enforces the rules, and records the
-value-bearing lifecycle events, and the database holds the content. Not
-everything starts as a startup. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the onchain/offchain split
+BountyBox lets anyone post a paid micro-task and lets anyone in the world do
+it — with the reward locked in an onchain escrow instead of a platform's
+custody. A creator funds a bounty in USDC; contributors register onchain,
+submit work, and get paid automatically when the creator accepts it. Built on
+**Arc mainnet** for **Arc Microgrants**.
 
-Arc uses USDC to pay gas, so you need a small amount of USDC on Arc to deploy
-and transact. No traction, company, deck, or roadmap needed — just something
-real that runs.
+## Why it's useful
+
+Paying strangers on the internet for small jobs is a trust problem: the worker
+fears doing the work and never getting paid, the poster fears paying upfront
+for work that never arrives. BountyBox removes the middleman from that trade:
+
+- **Workers see locked money, not promises.** The full prize pool moves into
+  the escrow contract before a bounty goes live, and every payout is a public
+  onchain event. You start work knowing the funds exist and can only go to
+  registered workers.
+- **Creators keep control without holding funds.** Accept winners one at a
+  time, close early and reclaim the unspent pool, or withdraw while nobody is
+  working. Once someone starts, the creator can no longer pocket the escrow —
+  the contract only allows paying workers or refunding.
+- **Money can never get stuck.** A permissionless safety valve refunds unspent
+  escrow after the deadlines, and stray transfers are recoverable. No admin
+  keys, no upgradeability, no one to appeal to — and no one needed.
+- **Made for Arc.** USDC is Arc's gas token *and* the reward currency, so there
+  is no swapping, bridging, or wrapping: the same asset you transact with is
+  the asset you're paid in.
+
+Whether it's a bug fix, a design asset, a translation, or a weekend
+experiment, if the work can be described and judged, it can be a bounty. See
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full onchain/offchain
+design.
 
 ## Deployed addresses
 
@@ -18,8 +41,6 @@ real that runs.
 | --- | --- | --- | --- |
 | Arc mainnet | 5042 | `0x57bC93735d190c24c0215DB48f52DEc796770e21` | [ArcScan](https://explorer.arc.io/address/0x57bC93735d190c24c0215DB48f52DEc796770e21) |
 | Arc testnet | 5042002 | `0xDc553dF938B2ad9d846784dCbc583a5c9f5F0d22` | [ArcScan](https://explorer.testnet.arc.io/address/0xDc553dF938B2ad9d846784dCbc583a5c9f5F0d22) |
-
-[BountyBox — USDC micro-task bounties on Arc](https://bountybox-brown.vercel.app/) 
 
 Rewards on both networks use Arc's USDC ERC-20 interface at
 `0x3600000000000000000000000000000000000000` (6 decimals, verified

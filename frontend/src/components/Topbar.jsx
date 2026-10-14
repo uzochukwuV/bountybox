@@ -1,6 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { Menu, Plus } from 'lucide-react';
+import { ARC_CHAIN } from '@/lib/arc';
 import ConnectWalletButton from '@/components/ConnectWalletButton';
 
 export default function Topbar({ onToggleNav }) {
@@ -27,7 +28,7 @@ export default function Topbar({ onToggleNav }) {
 
       <span className="ml-2 hidden items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[11px] font-medium text-muted-foreground sm:inline-flex">
         <span className="h-1.5 w-1.5 rounded-full bg-tone-violet" />
-        Arc Testnet
+        {ARC_CHAIN.name}
       </span>
 
       <div className="ml-auto flex items-center gap-2">

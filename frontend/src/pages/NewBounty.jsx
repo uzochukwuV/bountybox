@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useIdentity } from '@/lib/useIdentity';
-import { FAUCET_URL, formatUSDC } from '@/lib/arc';
+import { ARC_CHAIN, FAUCET_URL, formatUSDC } from '@/lib/arc';
 import { fundEscrowAndPublish } from '@/lib/bountyChain';
 import { describeRevert } from '@/lib/chain';
 import { validateDeadlines } from '@/lib/deadlines';
@@ -474,7 +474,8 @@ export default function NewBounty() {
                     : `Fund ${formatUSDC(reward)} USDC & publish`}
                 </Button>
                 <p className="text-center text-[11px] text-muted-foreground">
-                  Funds move on Arc Testnet — the reward is real USDC on the testnet.
+                  Funds move on {ARC_CHAIN.name} — the reward is real USDC
+                  {ARC_CHAIN.testnet ? ' on the testnet' : ''}.
                 </p>
               </div>
             </SectionCard>
